@@ -228,6 +228,7 @@ export function createMagicContextHook(deps: MagicContextDeps) {
         "chat.message": createChatMessageHook({
             db,
             toolUsageSinceUserTurn,
+            recentReduceBySession,
             variantBySession,
             flushedSessions,
             lastHeuristicsTurnId,

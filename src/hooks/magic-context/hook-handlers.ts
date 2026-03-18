@@ -46,6 +46,7 @@ export function getLiveNotificationParams(
 export function createChatMessageHook(args: {
     db: Parameters<typeof getOrCreateSessionMeta>[0];
     toolUsageSinceUserTurn: ToolUsageSinceUserTurn;
+    recentReduceBySession: RecentReduceBySession;
     variantBySession: VariantBySession;
     flushedSessions: FlushedSessions;
     lastHeuristicsTurnId: LastHeuristicsTurnId;
@@ -56,8 +57,10 @@ export function createChatMessageHook(args: {
 
         const sessionMeta = getOrCreateSessionMeta(args.db, sessionId);
         const turnUsage = args.toolUsageSinceUserTurn.get(sessionId);
+        const agentAlreadyReduced = args.recentReduceBySession.has(sessionId);
         if (
             !sessionMeta.isSubagent &&
+            !agentAlreadyReduced &&
             getPersistedStickyTurnReminder(args.db, sessionId) === null &&
             turnUsage !== undefined &&
             turnUsage >= TOOL_HEAVY_TURN_REMINDER_THRESHOLD
@@ -68,7 +71,11 @@ export function createChatMessageHook(args: {
 
         const previousVariant = args.variantBySession.get(sessionId);
         args.variantBySession.set(sessionId, input.variant);
-        if (previousVariant !== undefined && previousVariant !== input.variant) {
+        if (
+            previousVariant !== undefined &&
+            input.variant !== undefined &&
+            previousVariant !== input.variant
+        ) {
             log(
                 `[magic-context] variant changed (${previousVariant} -> ${input.variant}), triggering flush for session ${sessionId}`,
             );
