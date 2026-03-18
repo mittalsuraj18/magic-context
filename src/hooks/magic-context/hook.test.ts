@@ -397,11 +397,11 @@ describe("magic-context hook", () => {
         ]);
     });
 
-    it("keeps the hidden ctx_reduce reminder when the previous tool-heavy turn only queued ctx_reduce", async () => {
+    it("keeps the hidden ctx_reduce reminder when the previous tool-heavy turn did not reduce", async () => {
         process.env.XDG_DATA_HOME = makeTempDir("hook-turn-reminder-queued-reduce-");
         const hook = requireHook(createMagicContextHook(createMockDeps()));
 
-        for (const tool of ["read", "grep", "glob", "bash", "ctx_reduce"]) {
+        for (const tool of ["read", "grep", "glob", "bash", "edit"]) {
             await hook["tool.execute.after"]?.({ tool, sessionID: "ses-turn-reminder-suppressed" });
         }
 

@@ -409,4 +409,61 @@ describe("createTransform nudge cache handling", () => {
         expect(firstText(releasePass[0]!)).toContain("sticky reminder");
         expect(getPersistedStickyTurnReminder(db, "ses-1")).toContain("sticky reminder");
     });
+
+    it("clears sticky turn reminder when messages contain a recent ctx_reduce call", async () => {
+        //#given
+        useTempDataHome("context-transform-sticky-suppress-by-message-");
+        const scheduler: Scheduler = { shouldExecute: mock(() => "defer" as const) };
+        const db = openDatabase();
+        const transform = createTransform({
+            tagger: createTagger(),
+            scheduler,
+            contextUsageMap: new Map<string, { usage: ContextUsage; updatedAt: number }>([
+                [
+                    "ses-1",
+                    { usage: { percentage: 41, inputTokens: 80_000 }, updatedAt: Date.now() },
+                ],
+            ]),
+            nudger: () => null,
+            db,
+            nudgePlacements: createNudgePlacementStore(db),
+            flushedSessions: new Set<string>(),
+            lastHeuristicsTurnId: new Map<string, string>(),
+            clearReasoningAge: 50,
+            protectedTags: 0,
+            autoDropToolAge: 1000,
+        });
+
+        setPersistedStickyTurnReminder(
+            db,
+            "ses-1",
+            '\n\n<instruction name="ctx_reduce_turn_cleanup">sticky reminder</instruction>',
+        );
+
+        // Messages include a ctx_reduce tool call — agent already reduced
+        const messages: TestMessage[] = [
+            {
+                info: { id: "m-user", role: "user", sessionID: "ses-1" },
+                parts: [{ type: "text", text: "user prompt" }],
+            },
+            {
+                info: { id: "m-assistant", role: "assistant" },
+                parts: [
+                    { type: "text", text: "assistant response" },
+                    {
+                        type: "tool-invocation" as "text",
+                        callID: "reduce-call" as unknown as undefined,
+                        toolName: "ctx_reduce",
+                    } as unknown as TestMessage["parts"][0],
+                ],
+            },
+        ];
+
+        //#when
+        await transform({}, { messages });
+
+        //#then — reminder should be cleared from DB and NOT injected
+        expect(firstText(messages[0]!)).not.toContain("sticky reminder");
+        expect(getPersistedStickyTurnReminder(db, "ses-1")).toBeNull();
+    });
 });

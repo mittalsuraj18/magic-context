@@ -3,7 +3,7 @@ import type { MessageLike } from "./tag-messages";
 
 const STALE_TOOL_NAMES = new Set(["ctx_reduce"]);
 
-function isReduceToolPart(part: unknown): boolean {
+export function isReduceToolPart(part: unknown): boolean {
     if (!isRecord(part)) return false;
     // OpenCode format: { type: "tool", tool: "ctx_reduce" }
     if (part.type === "tool" && typeof part.tool === "string" && STALE_TOOL_NAMES.has(part.tool))

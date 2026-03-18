@@ -3,6 +3,7 @@ import { getSourceContents, saveSourceContent } from "../../features/magic-conte
 import type { Tagger } from "../../features/magic-context/tagger";
 import { byteSize, isThinkingPart, prependTag } from "./tag-content-primitives";
 import { createExistingTagResolver } from "./tag-id-fallback";
+import { isReduceToolPart } from "./drop-stale-reduce-calls";
 import {
     buildFileSourceContent,
     isFilePart,
@@ -41,6 +42,7 @@ export interface TagMessagesResult {
     messageTagNumbers: Map<MessageLike, number>;
     toolCallIndex: ToolCallIndex;
     batch: ToolMutationBatch;
+    hasRecentReduceCall: boolean;
 }
 
 function collectRelevantSourceTagIds(
@@ -85,6 +87,8 @@ export function tagMessages(
         collectRelevantSourceTagIds(messages, assignments),
     );
     let precedingThinkingParts: ThinkingLikePart[] = [];
+    let lastReduceMessageIndex = -1;
+    const RECENT_REDUCE_LOOKBACK = 10;
 
     db.transaction(() => {
         for (let msgIndex = 0; msgIndex < messages.length; msgIndex++) {
@@ -105,6 +109,11 @@ export function tagMessages(
 
             for (let partIndex = 0; partIndex < message.parts.length; partIndex += 1) {
                 const part = message.parts[partIndex];
+
+                if (isReduceToolPart(part)) {
+                    lastReduceMessageIndex = msgIndex;
+                }
+
                 const toolObservation = extractToolCallObservation(part);
                 if (toolObservation) {
                     const entry = toolCallIndex.get(toolObservation.callId) ?? {
@@ -265,5 +274,16 @@ export function tagMessages(
         targets.set(tagId, createToolDropTarget(callId, thinkingParts, toolCallIndex, batch));
     }
 
-    return { targets, reasoningByMessage, messageTagNumbers, toolCallIndex, batch };
+    const hasRecentReduceCall =
+        lastReduceMessageIndex >= 0 &&
+        messages.length - lastReduceMessageIndex <= RECENT_REDUCE_LOOKBACK;
+
+    return {
+        targets,
+        reasoningByMessage,
+        messageTagNumbers,
+        toolCallIndex,
+        batch,
+        hasRecentReduceCall,
+    };
 }

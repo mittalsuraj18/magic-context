@@ -179,6 +179,7 @@ export function createTransform(deps: TransformDeps) {
         >();
         let messageTagNumbers = new Map<MessageLike, number>();
         let batch: { finalize: () => void } | null = null;
+        let hasRecentReduceCall = false;
         try {
             const t0 = performance.now();
             deps.tagger.initFromDb(sessionId, db);
@@ -187,6 +188,7 @@ export function createTransform(deps: TransformDeps) {
             reasoningByMessage = result.reasoningByMessage;
             messageTagNumbers = result.messageTagNumbers;
             batch = result.batch;
+            hasRecentReduceCall = result.hasRecentReduceCall;
             logTransformTiming(sessionId, "tagMessages", t0);
         } catch (error) {
             log(
@@ -297,6 +299,7 @@ export function createTransform(deps: TransformDeps) {
             didMutateFromFlushedStatuses,
             watermark,
             forceMaterializationPercentage: FORCE_MATERIALIZE_PERCENTAGE,
+            hasRecentReduceCall,
         });
 
         const elapsed = (performance.now() - startTime).toFixed(1);

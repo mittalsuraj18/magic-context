@@ -68,6 +68,7 @@ interface RunPostTransformPhaseArgs {
     didMutateFromFlushedStatuses: boolean;
     watermark: number;
     forceMaterializationPercentage: number;
+    hasRecentReduceCall: boolean;
 }
 
 export function runPostTransformPhase(args: RunPostTransformPhaseArgs): void {
@@ -239,7 +240,14 @@ export function runPostTransformPhase(args: RunPostTransformPhaseArgs): void {
 
     const pendingUserTurnReminder = getPersistedStickyTurnReminder(args.db, args.sessionId);
     if (pendingUserTurnReminder) {
-        appendReminderToLatestUserMessage(args.messages, pendingUserTurnReminder);
+        if (args.hasRecentReduceCall) {
+            clearPersistedStickyTurnReminder(args.db, args.sessionId);
+            log(
+                "[magic-context] sticky turn reminder cleared — ctx_reduce found in recent messages",
+            );
+        } else {
+            appendReminderToLatestUserMessage(args.messages, pendingUserTurnReminder);
+        }
     }
 
     const messagesSinceLastUser = countMessagesSinceLastUser(args.messages);
