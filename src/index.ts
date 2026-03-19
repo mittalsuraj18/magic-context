@@ -63,6 +63,11 @@ const plugin: Plugin = async (ctx) => {
                     template: "ctx-flush",
                     description: "Force-process all pending magic context operations immediately",
                 },
+                "ctx-aug": {
+                    template: "ctx-aug",
+                    description:
+                        "Augment your prompt with project memory context via sidekick agent",
+                },
             };
 
             config.command = commandConfig;

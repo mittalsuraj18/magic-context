@@ -53,7 +53,3 @@ export interface OpenAIChatCompletionResponse {
     choices: OpenAIChatCompletionChoice[];
     usage?: OpenAIChatCompletionUsage;
 }
-
-export interface SidekickRunState {
-    ranSessions: Set<string>;
-}

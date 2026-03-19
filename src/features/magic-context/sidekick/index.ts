@@ -7,5 +7,4 @@ export type {
     OpenAIChatTool,
     OpenAIChatToolCall,
     SidekickConfig,
-    SidekickRunState,
 } from "./types";

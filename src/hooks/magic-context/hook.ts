@@ -127,6 +127,7 @@ export function createMagicContextHook(deps: MagicContextDeps) {
     }
 
     const nudgePlacements = createNudgePlacementStore(db);
+    const pendingSidekickResults = new Map<string, string>();
     const flushedSessions = new Set<string>();
     const lastHeuristicsTurnId = new Map<string, string>();
     const variantBySession = new Map<string, string | undefined>();
@@ -166,6 +167,7 @@ export function createMagicContextHook(deps: MagicContextDeps) {
         historianTimeoutMs: deps.config.historian_timeout_ms ?? DEFAULT_HISTORIAN_TIMEOUT_MS,
         getNotificationParams: (sessionId) =>
             getLiveNotificationParams(sessionId, liveModelBySession, variantBySession),
+        pendingSidekickResults,
     });
     const eventHandler = createEventHandler({
         contextUsageMap,
@@ -207,6 +209,14 @@ export function createMagicContextHook(deps: MagicContextDeps) {
                 ...params,
             });
         },
+        sidekick: deps.config.sidekick?.enabled
+            ? {
+                  config: deps.config.sidekick,
+                  projectPath: deps.directory,
+                  client: deps.client,
+                  pendingResults: pendingSidekickResults,
+              }
+            : undefined,
     });
 
     const emergencyNudgeFired = new Set<string>();

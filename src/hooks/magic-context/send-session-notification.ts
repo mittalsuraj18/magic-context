@@ -79,3 +79,39 @@ export async function sendIgnoredMessage(
         log("[magic-context] failed to send notification:", msg);
     }
 }
+
+/**
+ * Send a real user prompt that will be processed by the model (not ignored).
+ * Used by /ctx-aug to inject the augmented prompt after sidekick completes.
+ */
+export async function sendUserPrompt(
+    client: unknown,
+    sessionId: string,
+    text: string,
+): Promise<void> {
+    if (!hasNotificationSessionClient(client)) {
+        log("[magic-context] session prompt API unavailable for user prompt");
+        return;
+    }
+    const c = client as NotificationClient;
+
+    const input = {
+        path: { id: sessionId },
+        body: {
+            parts: [{ type: "text", text }],
+        },
+    };
+
+    try {
+        if (typeof c.session?.promptAsync === "function") {
+            await c.session.promptAsync(input);
+        } else if (typeof c.session?.prompt === "function") {
+            await Promise.resolve(c.session.prompt(input));
+        } else {
+            log("[magic-context] session prompt API unavailable for user prompt");
+        }
+    } catch (error: unknown) {
+        const msg = getErrorMessage(error);
+        log("[magic-context] failed to send user prompt:", msg);
+    }
+}

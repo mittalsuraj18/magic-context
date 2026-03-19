@@ -65,6 +65,8 @@ export interface TransformDeps {
     getNotificationParams?: (
         sessionId: string,
     ) => import("./send-session-notification").NotificationParams;
+    /** Sessions with pending sidekick augmentation — memory block is suppressed for these */
+    pendingSidekickResults?: Map<string, string>;
 }
 
 export function createTransform(deps: TransformDeps) {
@@ -101,6 +103,18 @@ export function createTransform(deps: TransformDeps) {
         const compartmentDirectory = deps.directory ?? "";
         const canRunCompartments =
             fullFeatureMode && deps.client !== undefined && compartmentDirectory.length > 0;
+
+        // Consume pending sidekick augmentation flag (the augmented prompt is already
+        // in the message array via sendUserPrompt). We do NOT suppress <project-memory>
+        // because removing and re-adding it across turns would bust the prompt cache.
+        // Minor memory overlap between <project-memory> and <sidekick-augmentation> is
+        // acceptable — a few hundred redundant tokens vs destroying the cache prefix.
+        if (deps.pendingSidekickResults?.has(sessionId)) {
+            deps.pendingSidekickResults.delete(sessionId);
+            log(
+                "[magic-context] sidekick augmented this turn (memory block kept for cache stability)",
+            );
+        }
 
         let pendingCompartmentInjection: PreparedCompartmentInjection | null = null;
         if (fullFeatureMode) {
