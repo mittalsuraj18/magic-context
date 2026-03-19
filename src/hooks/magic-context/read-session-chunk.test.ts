@@ -263,7 +263,7 @@ describe("readSessionChunk", () => {
                     role: "user",
                     part: {
                         type: "text",
-                        text: "<system-reminder>background finished</system-reminder>\n<!-- MAGIC_CONTEXT_INTERNAL_INITIATOR -->",
+                        text: "<system-reminder>background finished</system-reminder>\n<!-- OMO_INTERNAL_INITIATOR -->",
                     },
                 },
                 { id: "m-4", role: "assistant", part: { type: "text", text: "reply 2" } },

@@ -2,6 +2,78 @@ import { isRecord } from "../../shared/record-type-guard";
 import type { MessageLike, ThinkingLikePart } from "./tag-messages";
 
 const DROPPED_PLACEHOLDER_PATTERN = /^\[dropped §\d+§\]$/;
+const TAG_PREFIX_PATTERN = /^§\d+§\s*/;
+
+// Patterns that identify system-injected messages (notifications, reminders, etc.)
+// These should never reach the LLM — they're internal plumbing.
+const SYSTEM_INJECTION_PATTERNS = [
+    /^<!-- OMO_INTERNAL_INITIATOR -->$/,
+    /^<system-reminder>[\s\S]*<\/system-reminder>$/,
+    /^\[SYSTEM DIRECTIVE:/,
+    /^\[Category\+Skill Reminder\]/,
+    /^\[EDIT ERROR - IMMEDIATE ACTION REQUIRED\]/,
+    /^\[task CALL FAILED/,
+    /^\[EMERGENCY CONTEXT WINDOW WARNING\]/,
+];
+
+function isSystemInjectedText(text: string): boolean {
+    // Remove §N§ tag prefix that our tagger adds
+    const stripped = text.trim().replace(TAG_PREFIX_PATTERN, "").trim();
+    if (stripped.length === 0) return false;
+    return SYSTEM_INJECTION_PATTERNS.some((pattern) => pattern.test(stripped));
+}
+
+/**
+ * Remove messages that are system-injected (notifications, reminders, internal markers).
+ * These are internal plumbing messages that should never reach the LLM.
+ * No age check — ALL system-injected messages are stripped regardless of position.
+ */
+export function stripSystemInjectedMessages(messages: MessageLike[]): number {
+    let stripped = 0;
+    for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i];
+        if (msg.parts.length === 0) continue;
+
+        let hasContentPart = false;
+        let allContentIsSystemInjection = true;
+
+        for (const part of msg.parts) {
+            if (!isRecord(part)) continue;
+            const partType = part.type as string;
+
+            // Skip metadata parts
+            if (METADATA_PART_TYPES.has(partType)) continue;
+
+            // Check for ignored flag (set by sendIgnoredMessage)
+            if (part.ignored === true) continue;
+
+            // Tool parts are real content
+            if (partType === "tool") {
+                allContentIsSystemInjection = false;
+                break;
+            }
+
+            if (partType === "text" && typeof part.text === "string") {
+                hasContentPart = true;
+                if (!isSystemInjectedText(part.text)) {
+                    allContentIsSystemInjection = false;
+                    break;
+                }
+                continue;
+            }
+
+            // Any other content type — keep the message
+            allContentIsSystemInjection = false;
+            break;
+        }
+
+        if (hasContentPart && allContentIsSystemInjection) {
+            messages.splice(i, 1);
+            stripped++;
+        }
+    }
+    return stripped;
+}
 
 // OpenCode messages can have metadata parts alongside content parts.
 // Only text/reasoning/tool parts carry content to the model — metadata parts

@@ -1,4 +1,4 @@
-export const OMO_INTERNAL_INITIATOR_MARKER = "<!-- MAGIC_CONTEXT_INTERNAL_INITIATOR -->";
+export const OMO_INTERNAL_INITIATOR_MARKER = "<!-- OMO_INTERNAL_INITIATOR -->";
 
 export function createInternalAgentTextPart(text: string): {
     type: "text";

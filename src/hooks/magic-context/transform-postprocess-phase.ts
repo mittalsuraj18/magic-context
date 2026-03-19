@@ -24,6 +24,7 @@ import {
     stripClearedReasoning,
     stripDroppedPlaceholderMessages,
     stripInlineThinking,
+    stripSystemInjectedMessages,
 } from "./strip-content";
 import {
     appendReminderToLatestUserMessage,
@@ -250,6 +251,15 @@ export function runPostTransformPhase(args: RunPostTransformPhaseArgs): void {
     const strippedDropped = stripDroppedPlaceholderMessages(args.messages);
     if (strippedDropped > 0) {
         log(`[magic-context] stripped ${strippedDropped} empty dropped-placeholder messages`);
+    }
+
+    // Remove system-injected messages (notifications, reminders, internal markers).
+    // No age check — these are internal plumbing and should NEVER reach the LLM.
+    const strippedSystemInjected = stripSystemInjectedMessages(args.messages);
+    if (strippedSystemInjected > 0) {
+        log(
+            `[magic-context] stripped ${strippedSystemInjected} system-injected messages (notifications/reminders)`,
+        );
     }
 
     const pendingUserTurnReminder = getPersistedStickyTurnReminder(args.db, args.sessionId);

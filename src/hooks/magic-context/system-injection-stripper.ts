@@ -1,7 +1,7 @@
 const SYSTEM_INJECTION_MARKERS = [
-    "<!-- MAGIC_CONTEXT_INTERNAL_INITIATOR -->",
+    "<!-- OMO_INTERNAL_INITIATOR -->",
     "[SYSTEM DIRECTIVE: MAGIC-CONTEXT",
-    "[SYSTEM DIRECTIVE: OH-MY-CLAUDE",
+    "[SYSTEM DIRECTIVE: OH-MY-OPENCODE",
     "[Category+Skill Reminder]",
     "[EDIT ERROR - IMMEDIATE ACTION REQUIRED]",
     "[task CALL FAILED - IMMEDIATE RETRY REQUIRED]",
@@ -11,7 +11,7 @@ const SYSTEM_INJECTION_MARKERS = [
 ];
 
 const SYSTEM_REMINDER_REGEX = /<system-reminder>[\s\S]*?<\/system-reminder>/gi;
-const OMO_MARKER_REGEX = /<!-- MAGIC_CONTEXT_INTERNAL_INITIATOR -->/g;
+const OMO_MARKER_REGEX = /<!-- OMO_INTERNAL_INITIATOR -->/g;
 
 export function stripSystemInjection(text: string): string | null {
     let hasInjection = false;
