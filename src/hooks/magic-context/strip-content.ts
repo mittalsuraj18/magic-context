@@ -3,6 +3,22 @@ import type { MessageLike, ThinkingLikePart } from "./tag-messages";
 
 const DROPPED_PLACEHOLDER_PATTERN = /^\[dropped §\d+§\]$/;
 
+// OpenCode messages can have metadata parts alongside content parts.
+// Only text/reasoning/tool parts carry content to the model — metadata parts
+// are invisible to the LLM. We skip these when deciding if a message is
+// nothing but dropped placeholders.
+const METADATA_PART_TYPES = new Set([
+    "step-start",
+    "step-finish",
+    "snapshot",
+    "patch",
+    "agent",
+    "retry",
+    "subtask",
+    "compaction",
+    "file",
+]);
+
 /**
  * Remove messages that consist entirely of [dropped §N§] placeholders.
  * These are leftover shells after ctx_reduce drops their content — keeping them
@@ -14,19 +30,58 @@ export function stripDroppedPlaceholderMessages(messages: MessageLike[]): number
         const msg = messages[i];
         if (msg.parts.length === 0) continue;
 
-        const allDropped = msg.parts.every((part) => {
-            if (!isRecord(part) || part.type !== "text" || typeof part.text !== "string") {
-                return false;
-            }
-            // A message may contain multiple dropped placeholders, e.g. "[dropped §1§][dropped §2§]"
-            const trimmed = part.text.trim();
-            if (trimmed.length === 0) return true;
-            return trimmed
-                .split(/(?=\[dropped §)/)
-                .every((segment) => DROPPED_PLACEHOLDER_PATTERN.test(segment.trim()));
-        });
+        let hasContentPart = false;
+        let hasNonDroppedContent = false;
 
-        if (allDropped) {
+        for (const part of msg.parts) {
+            if (!isRecord(part)) continue;
+            const partType = part.type as string;
+
+            // Skip metadata parts — they don't reach the model
+            if (METADATA_PART_TYPES.has(partType)) continue;
+
+            // Tool parts carry content — don't strip messages with tool calls/results
+            if (partType === "tool") {
+                hasNonDroppedContent = true;
+                break;
+            }
+
+            // Text parts: check if they're only dropped placeholders
+            if (partType === "text" && typeof part.text === "string") {
+                hasContentPart = true;
+                const trimmed = part.text.trim();
+                if (trimmed.length === 0) continue;
+                const allSegmentsDropped = trimmed
+                    .split(/(?=\[dropped §)/)
+                    .every((segment) => DROPPED_PLACEHOLDER_PATTERN.test(segment.trim()));
+                if (!allSegmentsDropped) {
+                    hasNonDroppedContent = true;
+                    break;
+                }
+                continue;
+            }
+
+            // Reasoning parts: check similarly
+            if (partType === "reasoning" && typeof part.text === "string") {
+                hasContentPart = true;
+                const trimmed = part.text.trim();
+                if (trimmed.length === 0) continue;
+                const allSegmentsDropped = trimmed
+                    .split(/(?=\[dropped §)/)
+                    .every((segment) => DROPPED_PLACEHOLDER_PATTERN.test(segment.trim()));
+                if (!allSegmentsDropped) {
+                    hasNonDroppedContent = true;
+                    break;
+                }
+                continue;
+            }
+
+            // Unknown content-carrying part type — don't strip
+            hasNonDroppedContent = true;
+            break;
+        }
+
+        if (hasContentPart && !hasNonDroppedContent) {
             messages.splice(i, 1);
             stripped++;
         }
