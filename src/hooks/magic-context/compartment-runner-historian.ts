@@ -5,6 +5,7 @@ import { HISTORIAN_AGENT } from "../../agents/historian";
 import { DEFAULT_HISTORIAN_TIMEOUT_MS } from "../../config/schema/magic-context";
 import type { PluginContext } from "../../plugin/types";
 import * as shared from "../../shared";
+import { getErrorMessage } from "../../shared/error-message";
 import { extractLatestAssistantText } from "../../tools/look-at/assistant-message-extractor";
 import type {
     HistorianProgressCallbacks,
@@ -150,7 +151,7 @@ async function runHistorianPrompt(args: {
         );
         return { ok: true, result, dumpPath };
     } catch (modelError: unknown) {
-        const modelMsg = modelError instanceof Error ? modelError.message : String(modelError);
+        const modelMsg = getErrorMessage(modelError);
         const modelStack = modelError instanceof Error ? modelError.stack : undefined;
         shared.log("[magic-context] compartment agent: historian attempt failed", {
             error: modelMsg,
@@ -165,7 +166,7 @@ async function runHistorianPrompt(args: {
                 .catch((e: unknown) => {
                     shared.log(
                         "[magic-context] compartment agent: session cleanup failed",
-                        e instanceof Error ? e.message : String(e),
+                        getErrorMessage(e),
                     );
                 });
         }
@@ -180,7 +181,7 @@ function cleanupHistorianDump(dumpPath?: string): void {
     } catch (error: unknown) {
         shared.log("[magic-context] compartment agent: failed to remove historian response dump", {
             dumpPath,
-            error: error instanceof Error ? error.message : String(error),
+            error: getErrorMessage(error),
         });
     }
 }
@@ -205,7 +206,7 @@ function dumpHistorianResponse(sessionId: string, label: string, text: string): 
         shared.log("[magic-context] compartment agent: failed to dump historian response", {
             sessionId,
             label,
-            error: error instanceof Error ? error.message : String(error),
+            error: getErrorMessage(error),
         });
         return undefined;
     }

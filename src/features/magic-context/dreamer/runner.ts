@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { getErrorMessage } from "../../../shared/error-message";
 import { acquireLease, getLeaseHolder, releaseLease, renewLease } from "./lease";
 import { setDreamState } from "./storage-dream-state";
 import { runConsolidateTask } from "./task-consolidate";
@@ -75,7 +76,7 @@ export async function runDream(args: {
                     name: taskName,
                     durationMs: Date.now() - taskStartedAt,
                     result: null,
-                    error: error instanceof Error ? error.message : String(error),
+                    error: getErrorMessage(error),
                 });
             }
 

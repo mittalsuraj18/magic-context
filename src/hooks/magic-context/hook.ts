@@ -13,6 +13,7 @@ import {
 import type { Tagger } from "../../features/magic-context/tagger";
 import type { ContextUsage } from "../../features/magic-context/types";
 import type { PluginContext } from "../../plugin/types";
+import { getErrorMessage } from "../../shared/error-message";
 import { log } from "../../shared/logger";
 import { createMagicContextCommandHandler } from "./command-handler";
 import { createEventHandler } from "./event-handler";
@@ -119,7 +120,7 @@ export function createMagicContextHook(deps: MagicContextDeps) {
             return null;
         }
     } catch (error) {
-        const reason = error instanceof Error ? error.message : String(error);
+        const reason = getErrorMessage(error);
         log("[magic-context] hook failed to open storage; disabling feature:", error);
         notifyMagicContextDisabled(deps.client, reason);
         return null;

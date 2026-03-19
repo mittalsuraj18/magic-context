@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { getOpenCodeStorageDir } from "../../shared/data-path";
+import { getErrorMessage } from "../../shared/error-message";
 import { log } from "../../shared/logger";
 
 const databases = new Map<string, Database>();
@@ -227,7 +228,7 @@ export function openDatabase(): Database {
         return db;
     } catch (error) {
         log("[magic-context] storage error:", error);
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage = getErrorMessage(error);
         const existingFallback = databases.get(FALLBACK_DATABASE_KEY);
         if (existingFallback) {
             if (!persistenceByDatabase.has(existingFallback)) {

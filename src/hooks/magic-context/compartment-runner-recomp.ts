@@ -4,6 +4,7 @@ import { resolveProjectIdentity } from "../../features/magic-context/memory/proj
 import { getSessionNotes } from "../../features/magic-context/storage";
 import { updateSessionMeta } from "../../features/magic-context/storage-meta";
 import { normalizeSDKResponse } from "../../shared";
+import { getErrorMessage } from "../../shared/error-message";
 import { buildCompartmentAgentPrompt } from "./compartment-prompt";
 import { queueDropsForCompartmentalizedMessages } from "./compartment-runner-drop-queue";
 import { runValidatedHistorianPass } from "./compartment-runner-historian";
@@ -202,7 +203,7 @@ export async function executeContextRecompInternal(deps: CompartmentRunnerDeps):
         ].join("\n");
     } catch (error: unknown) {
         // Recomp replaces durable state atomically, so unexpected failures must leave state untouched.
-        const message = error instanceof Error ? error.message : String(error);
+        const message = getErrorMessage(error);
         return `## Magic Recomp\n\nRecomp failed unexpectedly: ${message}\n\nNothing was written.`;
     } finally {
         updateSessionMeta(db, sessionId, { compartmentInProgress: false });

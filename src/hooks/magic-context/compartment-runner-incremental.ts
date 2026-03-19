@@ -8,6 +8,7 @@ import { resolveProjectIdentity } from "../../features/magic-context/memory/proj
 import { getSessionNotes } from "../../features/magic-context/storage";
 import { updateSessionMeta } from "../../features/magic-context/storage-meta";
 import { normalizeSDKResponse } from "../../shared";
+import { getErrorMessage } from "../../shared/error-message";
 import { buildCompartmentAgentPrompt } from "./compartment-prompt";
 import { queueDropsForCompartmentalizedMessages } from "./compartment-runner-drop-queue";
 import { runValidatedHistorianPass } from "./compartment-runner-historian";
@@ -160,7 +161,7 @@ export async function runCompartmentAgent(deps: CompartmentRunnerDeps): Promise<
         completedSuccessfully = true;
     } catch (error: unknown) {
         // Historian runs are fail-closed because they update durable compartment state.
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = getErrorMessage(error);
         if (!issueNotified) {
             await notifyHistorianIssue(
                 `## Historian alert\n\nHistorian failed unexpectedly: ${msg}\n\nNo new compartments or facts were written. Check the historian model/output and try again.`,

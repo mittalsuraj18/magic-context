@@ -8,6 +8,7 @@ import {
     queuePendingOp,
     updateSessionMeta,
 } from "../../features/magic-context/storage";
+import { getErrorMessage } from "../../shared/error-message";
 import { CTX_REDUCE_DESCRIPTION } from "./constants";
 import type { CtxReduceArgs } from "./types";
 
@@ -90,7 +91,7 @@ function createCtxReduceTool(deps: CtxReduceToolDeps): ToolDefinition {
                     }
                 })();
             } catch (error) {
-                const errorMessage = error instanceof Error ? error.message : String(error);
+                const errorMessage = getErrorMessage(error);
                 return `Error: Failed to queue ctx_reduce operations. ${errorMessage}`;
             }
 

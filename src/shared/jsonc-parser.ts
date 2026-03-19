@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 
+import { getErrorMessage } from "./error-message";
+
 export interface JsoncParseResult<T> {
     data: T | null;
     errors: Array<{ message: string; offset: number; length: number }>;
@@ -127,7 +129,7 @@ export function parseJsoncSafe<T = unknown>(content: string): JsoncParseResult<T
             data: null,
             errors: [
                 {
-                    message: error instanceof Error ? error.message : String(error),
+                    message: getErrorMessage(error),
                     offset: 0,
                     length: content.length,
                 },

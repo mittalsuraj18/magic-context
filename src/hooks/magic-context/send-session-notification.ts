@@ -1,3 +1,4 @@
+import { getErrorMessage } from "../../shared/error-message";
 import { log } from "../../shared/logger";
 
 export interface NotificationParams {
@@ -74,7 +75,7 @@ export async function sendIgnoredMessage(
             log("[magic-context] session prompt API unavailable for notification");
         }
     } catch (error: unknown) {
-        const msg = error instanceof Error ? error.message : String(error);
+        const msg = getErrorMessage(error);
         log("[magic-context] failed to send notification:", msg);
     }
 }
