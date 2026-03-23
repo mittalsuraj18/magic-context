@@ -249,7 +249,7 @@ describe("createTransform nudge cache handling", () => {
         expect(assistantText.match(/<instruction name="context_/g)?.length).toBe(1);
     });
 
-    it("clears persisted anchor and skips re-anchoring when the anchored message is gone after restart", async () => {
+    it("preserves persisted anchor and skips re-anchoring when the anchored message is gone after restart", async () => {
         //#given
         useTempDataHome("context-transform-nudge-restart-skip-");
         const scheduler: Scheduler = { shouldExecute: mock(() => "defer" as const) };
@@ -294,7 +294,10 @@ describe("createTransform nudge cache handling", () => {
         //#then
         expect(firstText(secondPass[1]!)).toContain("assistant response");
         expect(firstText(secondPass[1]!)).not.toContain('<instruction name="context_');
-        expect(getPersistedNudgePlacement(db, "ses-1")).toBeNull();
+        expect(getPersistedNudgePlacement(db, "ses-1")).toEqual({
+            messageId: "m-assistant",
+            nudgeText: '\n\n<instruction name="context_warning">warning</instruction>',
+        });
     });
 
     it("keeps sticky turn reminders across defer passes until pending drops are released", async () => {
@@ -334,7 +337,8 @@ describe("createTransform nudge cache handling", () => {
 
         //#then
         expect(firstText(firstPass[0]!)).toContain("sticky reminder");
-        expect(getPersistedStickyTurnReminder(db, "ses-1")).toContain("sticky reminder");
+        expect(getPersistedStickyTurnReminder(db, "ses-1")?.text).toContain("sticky reminder");
+        expect(getPersistedStickyTurnReminder(db, "ses-1")?.messageId).toBe("m-user");
 
         const secondPass = makeMessages();
 
@@ -343,7 +347,8 @@ describe("createTransform nudge cache handling", () => {
 
         //#then
         expect(firstText(secondPass[0]!)).toContain("sticky reminder");
-        expect(getPersistedStickyTurnReminder(db, "ses-1")).toContain("sticky reminder");
+        expect(getPersistedStickyTurnReminder(db, "ses-1")?.text).toContain("sticky reminder");
+        expect(getPersistedStickyTurnReminder(db, "ses-1")?.messageId).toBe("m-user");
 
         queuePendingOp(db, "ses-1", 1, "drop");
         scheduler.shouldExecute = mock(() => "execute" as const);
@@ -408,7 +413,82 @@ describe("createTransform nudge cache handling", () => {
 
         //#then
         expect(firstText(releasePass[0]!)).toContain("sticky reminder");
-        expect(getPersistedStickyTurnReminder(db, "ses-1")).toContain("sticky reminder");
+        expect(getPersistedStickyTurnReminder(db, "ses-1")?.text).toContain("sticky reminder");
+        expect(getPersistedStickyTurnReminder(db, "ses-1")?.messageId).toBe("m-user");
+    });
+
+    it("keeps sticky turn reminder anchored to the original user message across later turns", async () => {
+        //#given
+        useTempDataHome("context-transform-sticky-anchor-stable-");
+        const scheduler: Scheduler = { shouldExecute: mock(() => "defer" as const) };
+        const db = openDatabase();
+        const transform = createTransform({
+            tagger: createTagger(),
+            scheduler,
+            contextUsageMap: new Map<string, { usage: ContextUsage; updatedAt: number }>([
+                [
+                    "ses-1",
+                    { usage: { percentage: 41, inputTokens: 80_000 }, updatedAt: Date.now() },
+                ],
+            ]),
+            nudger: () => null,
+            db,
+            nudgePlacements: createNudgePlacementStore(db),
+            flushedSessions: new Set<string>(),
+            lastHeuristicsTurnId: new Map<string, string>(),
+            clearReasoningAge: 50,
+            protectedTags: 0,
+            autoDropToolAge: 1000,
+        });
+
+        setPersistedStickyTurnReminder(
+            db,
+            "ses-1",
+            '\n\n<instruction name="ctx_reduce_turn_cleanup">sticky reminder</instruction>',
+        );
+
+        const firstPass: TestMessage[] = [
+            {
+                info: { id: "m-user-1", role: "user", sessionID: "ses-1" },
+                parts: [{ type: "text", text: "first user prompt" }],
+            },
+            {
+                info: { id: "m-assistant-1", role: "assistant" },
+                parts: [{ type: "text", text: "assistant response" }],
+            },
+        ];
+
+        await transform({}, { messages: firstPass });
+
+        const secondPass: TestMessage[] = [
+            {
+                info: { id: "m-user-1", role: "user", sessionID: "ses-1" },
+                parts: [{ type: "text", text: "first user prompt" }],
+            },
+            {
+                info: { id: "m-assistant-1", role: "assistant" },
+                parts: [{ type: "text", text: "assistant response" }],
+            },
+            {
+                info: { id: "m-user-2", role: "user", sessionID: "ses-1" },
+                parts: [{ type: "text", text: "second user prompt" }],
+            },
+            {
+                info: { id: "m-assistant-2", role: "assistant" },
+                parts: [{ type: "text", text: "later assistant response" }],
+            },
+        ];
+
+        //#when
+        await transform({}, { messages: secondPass });
+
+        //#then
+        expect(firstText(secondPass[0]!)).toContain("sticky reminder");
+        expect(firstText(secondPass[2]!)).not.toContain("sticky reminder");
+        expect(getPersistedStickyTurnReminder(db, "ses-1")).toEqual({
+            text: '\n\n<instruction name="ctx_reduce_turn_cleanup">sticky reminder</instruction>',
+            messageId: "m-user-1",
+        });
     });
 
     it("clears sticky turn reminder when messages contain a recent ctx_reduce call", async () => {
