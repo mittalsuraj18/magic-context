@@ -15,7 +15,6 @@ import {
     closeDatabase,
     getOrCreateSessionMeta,
     getPendingOps,
-    getSessionNotes,
     getTagsBySession,
     openDatabase,
     updateSessionMeta,
@@ -39,65 +38,6 @@ afterEach(() => {
 });
 
 describe("executeContextRecomp", () => {
-    it("stores rewritten session notes from historian output", async () => {
-        useTempDataHome("magic-recomp-notes-");
-        createOpenCodeDb("ses-recomp-notes", [
-            {
-                id: "m-1",
-                role: "user",
-                text: "The user wants the rename to be broad and user-facing.",
-            },
-            { id: "m-2", role: "assistant", text: "Acknowledged and started planning." },
-            { id: "m-3", role: "user", text: "protected 1" },
-            { id: "m-4", role: "user", text: "protected 2" },
-            { id: "m-5", role: "user", text: "protected 3" },
-            { id: "m-6", role: "user", text: "protected 4" },
-            { id: "m-7", role: "user", text: "protected 5" },
-        ]);
-
-        const db = openDatabase();
-        const client = {
-            session: {
-                get: mock(async () => ({ data: { directory: "/tmp/recomp-notes" } })),
-                create: mock(async () => ({ data: { id: "ses-agent-recomp-notes" } })),
-                prompt: mock(async () => ({})),
-                messages: mock(async () => ({
-                    data: [
-                        {
-                            info: { role: "assistant", time: { created: 1 } },
-                            parts: [
-                                {
-                                    type: "text",
-                                    text: `<compartment start="1" end="2" title="Directive capture">Preserved the user's durable direction.</compartment>\n<USER_DIRECTIVES>\n* Keep the magic-context rename broad and user-facing.\n</USER_DIRECTIVES>\n<session_notes>\n* Keep the rename broad and verify command aliases.\n</session_notes>`,
-                                },
-                            ],
-                        },
-                    ],
-                })),
-                delete: mock(async () => ({})),
-            },
-        } as unknown as PluginContext["client"];
-
-        const result = await executeContextRecomp({
-            client,
-            db,
-            sessionId: "ses-recomp-notes",
-            tokenBudget: 10_000,
-            directory: "/tmp",
-        });
-
-        expect(result).toContain("Replaced session notes with 1 current entry");
-        expect(getSessionNotes(db, "ses-recomp-notes").map((note) => note.content)).toEqual([
-            "Keep the rename broad and verify command aliases.",
-        ]);
-        expect(getSessionFacts(db, "ses-recomp-notes")).toEqual([
-            expect.objectContaining({
-                category: "USER_DIRECTIVES",
-                content: "Keep the magic-context rename broad and user-facing.",
-            }),
-        ]);
-    });
-
     it("rebuilds from raw history and ignores broken stored compartments as source truth", async () => {
         useTempDataHome("magic-recomp-rebuild-");
         createOpenCodeDb("ses-recomp", [
@@ -170,7 +110,7 @@ describe("executeContextRecomp", () => {
             directory: "/tmp",
         });
 
-        expect(result).toContain("Rebuilt 1 compartments across 1 historian pass");
+        expect(result).toContain("Rebuilt 1 compartment across 1 historian pass");
         expect(result).toContain("Covered raw history 1-4");
         expect(
             getIgnoredNotificationTexts(client.session.prompt as ReturnType<typeof mock>),
@@ -361,22 +301,19 @@ describe("executeContextRecomp", () => {
             directory: "/tmp",
         });
 
-        expect(result).toContain("Rebuilt 1 compartments across 1 historian pass");
-        expect(messages).toHaveBeenCalledTimes(2);
-        expect(getHistorianPromptCount(prompt)).toBe(2);
+        // Gap healing absorbs the 1-message gap (1→3), so the first attempt succeeds
+        // without a repair retry. Both compartments are kept with the gap healed.
+        expect(result).toContain("Rebuilt 2 compartments across 1 historian pass");
+        expect(messages).toHaveBeenCalledTimes(1);
+        expect(getHistorianPromptCount(prompt)).toBe(1);
         expect(getIgnoredNotificationTexts(prompt)).toEqual(
             expect.arrayContaining([
                 "## Magic Recomp\n\nHistorian pass 1, attempt 1 started for messages 1-4.",
-                expect.stringContaining(
-                    "Historian pass 1, attempt 1 is continuing with a repair retry for messages 1-4.",
-                ),
             ]),
         );
         expect(getCompartments(db, "ses-recomp-retry")).toEqual([
-            expect.objectContaining({ startMessage: 1, endMessage: 4, title: "Recovered history" }),
-        ]);
-        expect(getSessionFacts(db, "ses-recomp-retry")).toEqual([
-            expect.objectContaining({ category: "CONSTRAINTS", content: "Rebuilt fact." }),
+            expect.objectContaining({ startMessage: 1, endMessage: 2, title: "Part one" }),
+            expect.objectContaining({ startMessage: 3, endMessage: 4, title: "Part two" }),
         ]);
     });
 
@@ -592,27 +529,18 @@ describe("executeContextRecomp", () => {
             directory: "/tmp",
         });
 
+        // Gap healing absorbs the 1-message gap, so the first attempt succeeds
+        // without a repair retry or chunk shrinking.
         expect(result).toContain("## Magic Recomp");
         expect(result).toContain("Covered raw history 1-6");
         expect(getIgnoredNotificationTexts(prompt)).toEqual(
             expect.arrayContaining([
-                expect.stringContaining(
-                    "Historian pass 1, attempt 1 is continuing with a repair retry for messages 1-6.",
-                ),
-                expect.stringContaining(
-                    "Historian pass 1, attempt 1 is continuing with a smaller chunk ending at",
-                ),
                 "## Magic Recomp\n\nHistorian pass 1, attempt 1 started for messages 1-6.",
             ]),
         );
-        expect(getCompartments(db, "ses-recomp-smaller")).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({ startMessage: 1 }),
-                expect.objectContaining({ endMessage: 6 }),
-            ]),
-        );
-        expect(getSessionFacts(db, "ses-recomp-smaller")).toEqual([
-            expect.objectContaining({ category: "WORKFLOW_RULES", content: "Final fact." }),
+        expect(getCompartments(db, "ses-recomp-smaller")).toEqual([
+            expect.objectContaining({ startMessage: 1, endMessage: 2 }),
+            expect.objectContaining({ startMessage: 3, endMessage: 6 }),
         ]);
     });
 
@@ -657,7 +585,7 @@ describe("executeContextRecomp", () => {
                         parts: [
                             {
                                 type: "text",
-                                text: `<compartment start="${chunkStart}" end="${chunkStart}" title="Bad one">One</compartment>\n<compartment start="${chunkStart + 2}" end="${chunkEnd}" title="Bad two">Two</compartment>`,
+                                text: `<compartment start="${chunkStart}" end="${chunkStart + 2}" title="Bad one">One</compartment>\n<compartment start="${chunkStart + 1}" end="${chunkEnd}" title="Bad two">Two</compartment>`,
                             },
                         ],
                     },
@@ -682,8 +610,8 @@ describe("executeContextRecomp", () => {
             directory: "/tmp",
         });
 
+        // Overlapping compartments are NOT healed by gap healing, so retry/shrink triggers.
         expect(result).toContain("Recomp failed while rebuilding messages 1-6");
-        expect(result).toContain("Nothing was written.");
         expect(getIgnoredNotificationTexts(prompt)).toEqual(
             expect.arrayContaining([
                 "## Magic Recomp\n\nHistorian pass 1, attempt 1 started for messages 1-6.",
@@ -791,17 +719,13 @@ describe("executeContextRecomp", () => {
             directory: "/tmp",
         });
 
+        // Gap healing absorbs the 1-message gap, so the first attempt succeeds
+        // without a repair retry. Second pass covers remaining messages.
         expect(result).toContain("Covered raw history 1-7");
         expect(getIgnoredNotificationTexts(prompt)).toEqual(
             expect.arrayContaining([
                 "## Magic Recomp\n\nHistorian pass 1, attempt 1 started for messages 1-6.",
-                expect.stringContaining(
-                    "Historian pass 1, attempt 1 is continuing with a repair retry for messages 1-6.",
-                ),
-                expect.stringContaining(
-                    "Historian pass 1, attempt 1 is continuing with a smaller chunk ending at 5 because messages 1-6 could not be validated.",
-                ),
-                "## Magic Recomp\n\nHistorian pass 2, attempt 1 started for messages 6-7.",
+                "## Magic Recomp\n\nHistorian pass 2, attempt 1 started for messages 7-7.",
             ]),
         );
     });
@@ -1088,7 +1012,7 @@ describe("runCompartmentAgent", () => {
         expect(sentPrompt).toContain("[4] A: three");
         expect(sentPrompt).not.toContain("msg_");
         expect(sentPrompt).toContain(
-            "Existing state (normalize all facts; they may be stale, narrative, or task-local):",
+            "Existing state (emit these compartments unchanged; only normalize facts",
         );
         expect(sentPrompt).toContain(
             '<compartment start="1" end="2" title="Earlier &quot;work&quot;">',
@@ -1098,7 +1022,7 @@ describe("runCompartmentAgent", () => {
         );
         expect(sentPrompt).toContain("<WORKFLOW_RULES>");
         expect(sentPrompt).toContain("* Commit to feat first.");
-        expect(sentPrompt).toContain("Do not preserve prior narrative wording verbatim");
+        expect(sentPrompt).toContain("Do not copy wording verbatim");
         expect(sentPrompt).not.toContain("[1] U: zero");
 
         const compartments = getCompartments(db, "ses-2");

@@ -10,6 +10,39 @@ import type {
 
 const MIN_RECOMP_CHUNK_TOKEN_BUDGET = 20;
 
+/**
+ * Heal small gaps between adjacent compartments by expanding the previous compartment's
+ * endMessage forward to meet the next compartment's startMessage.
+ *
+ * The historian sometimes skips noise-only message ranges (tool calls, dropped placeholders,
+ * system reminders) which produces valid summaries but non-contiguous ranges. Instead of
+ * rejecting the output and burning a repair retry, we absorb the gap into the preceding
+ * compartment's range — the skipped messages were noise anyway.
+ *
+ * Gaps larger than MAX_HEALABLE_GAP are left untouched and will fail validation,
+ * since large gaps likely indicate a real historian problem rather than skipped noise.
+ *
+ * Mutates the compartments array in place.
+ */
+function healCompartmentGaps(
+    compartments: Array<{ startMessage: number; endMessage: number }>,
+    _unprocessedFrom: number | null,
+): void {
+    const MAX_HEALABLE_GAP = 15;
+
+    for (let i = 1; i < compartments.length; i++) {
+        const prev = compartments[i - 1]!;
+        const curr = compartments[i]!;
+        const expectedStart = prev.endMessage + 1;
+        const gapSize = curr.startMessage - expectedStart;
+
+        if (gapSize > 0 && gapSize <= MAX_HEALABLE_GAP) {
+            // Small gap — expand previous compartment to fill it
+            prev.endMessage = curr.startMessage - 1;
+        }
+    }
+}
+
 export function validateHistorianOutput(
     text: string,
     sessionId: string,
@@ -34,6 +67,11 @@ export function validateHistorianOutput(
     )
         ? "full"
         : "chunk";
+
+    // Heal gaps between compartments by expanding the previous compartment's endMessage.
+    // The historian sometimes skips noise-only message ranges (tool calls, dropped placeholders)
+    // which produces valid summaries but invalid contiguous ranges.
+    healCompartmentGaps(parsed.compartments, parsed.unprocessedFrom);
 
     const mapped =
         mode === "full"
@@ -64,7 +102,6 @@ export function validateHistorianOutput(
         mode,
         compartments: mapped.compartments,
         facts: parsed.facts,
-        notes: parsed.notes,
     };
 }
 
@@ -136,6 +173,11 @@ function validateParsedCompartments(
     }
 
     if (unprocessedFrom !== null) {
+        // Treat unprocessed_from === chunkEnd + 1 as "fully processed" —
+        // historian consumed all messages and reported the next ordinal.
+        if (unprocessedFrom === chunkEnd + 1) {
+            return null;
+        }
         if (unprocessedFrom < chunkStart || unprocessedFrom > chunkEnd) {
             return `<unprocessed_from> ${unprocessedFrom} is outside chunk ${chunkStart}-${chunkEnd}`;
         }

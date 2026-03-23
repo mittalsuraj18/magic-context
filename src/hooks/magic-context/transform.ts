@@ -61,6 +61,7 @@ export interface TransformDeps {
         injectionBudgetTokens: number;
     };
     compartmentTokenBudget?: number;
+    historyBudgetPercentage?: number;
     historianTimeoutMs?: number;
     getNotificationParams?: (
         sessionId: string,
@@ -218,6 +219,14 @@ export function createTransform(deps: TransformDeps) {
             sessionId,
             resolvedSessionId,
             compartmentTokenBudget: deps.compartmentTokenBudget ?? DEFAULT_COMPARTMENT_TOKEN_BUDGET,
+            historyBudgetTokens:
+                deps.historyBudgetPercentage && contextUsage.percentage > 0
+                    ? Math.floor(
+                          (contextUsage.inputTokens / (contextUsage.percentage / 100)) *
+                              (contextUsage.percentage / 100) *
+                              deps.historyBudgetPercentage,
+                      )
+                    : undefined,
             historianTimeoutMs: deps.historianTimeoutMs,
             compartmentDirectory,
             messages,

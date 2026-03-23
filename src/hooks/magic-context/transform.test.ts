@@ -854,7 +854,8 @@ describe("createTransform", () => {
         expect(injected).toContain("<session-history>");
         expect(injected).toContain("<project-memory>");
         expect(injected).toContain("Always use Bun");
-        expect(injected).toContain('<compartment title="Setup">');
+        expect(injected).toContain('title="Setup"');
+        expect(injected).toMatch(/<compartment start="\d+" end="\d+" title="Setup">/);
     });
 
     it("skips project memory injection for subagent sessions", async () => {

@@ -122,6 +122,7 @@ function makeMemoryDatabase(): Database {
       nudge_anchor_message_id TEXT DEFAULT '',
       nudge_anchor_text TEXT DEFAULT '',
       sticky_turn_reminder_text TEXT DEFAULT '',
+      sticky_turn_reminder_message_id TEXT DEFAULT '',
       is_subagent INTEGER DEFAULT 0,
       last_context_percentage REAL DEFAULT 0,
       last_input_tokens INTEGER DEFAULT 0,
@@ -268,7 +269,19 @@ describe("magic-context storage", () => {
         setPersistedStickyTurnReminder(db, sessionId, "\n[sticky reminder]");
 
         //#then
-        expect(getPersistedStickyTurnReminder(db, sessionId)).toBe("\n[sticky reminder]");
+        expect(getPersistedStickyTurnReminder(db, sessionId)).toEqual({
+            text: "\n[sticky reminder]",
+            messageId: null,
+        });
+
+        //#when
+        setPersistedStickyTurnReminder(db, sessionId, "\n[sticky reminder]", "m-user");
+
+        //#then
+        expect(getPersistedStickyTurnReminder(db, sessionId)).toEqual({
+            text: "\n[sticky reminder]",
+            messageId: "m-user",
+        });
 
         //#when
         clearPersistedStickyTurnReminder(db, sessionId);
@@ -304,19 +317,10 @@ describe("magic-context storage", () => {
                     updatedAt: Date.now(),
                 },
             ],
-            [
-                {
-                    id: 1,
-                    sessionId: "ses-1",
-                    content: "Remember <session_notes> & anchors.",
-                    createdAt: Date.now(),
-                },
-            ],
         );
 
         expect(block).toContain("Keep &lt;instruction&gt; &amp; &lt;magic-context&gt; safe.");
         expect(block).toContain("Don't drop Sam's &lt;ctx_reduce&gt; note &amp; rationale.");
-        expect(block).toContain("Remember &lt;session_notes&gt; &amp; anchors.");
     });
 
     it("throws when storage operations fail", () => {

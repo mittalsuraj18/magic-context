@@ -7,6 +7,7 @@ export const DEFAULT_NUDGE_INTERVAL_TOKENS = 10_000;
 export const DEFAULT_EXECUTE_THRESHOLD_PERCENTAGE = 65;
 export const DEFAULT_COMPARTMENT_TOKEN_BUDGET = 20_000;
 export const DEFAULT_HISTORIAN_TIMEOUT_MS = 300_000;
+export const DEFAULT_HISTORY_BUDGET_PERCENTAGE = 0.15;
 export const DEFAULT_LOCAL_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
 
 export const DreamingTaskSchema = z.enum(["decay", "consolidate", "mine", "verify", "git", "map"]);
@@ -91,6 +92,7 @@ export interface MagicContextConfig {
     clear_reasoning_age: number;
     iteration_nudge_threshold: number;
     compartment_token_budget: number;
+    history_budget_percentage: number;
     historian_timeout_ms: number;
     embedding: EmbeddingConfig;
     memory: {
@@ -142,6 +144,12 @@ export const MagicContextConfigSchema = z
         iteration_nudge_threshold: z.number().min(5).default(15),
         /** Token budget for compartment agent when summarizing history (default: 20000) */
         compartment_token_budget: z.number().min(10000).default(DEFAULT_COMPARTMENT_TOKEN_BUDGET),
+        /** Fraction of usable context (context_limit × execute_threshold) reserved for the session history block (default: 0.15) */
+        history_budget_percentage: z
+            .number()
+            .min(0.05)
+            .max(0.5)
+            .default(DEFAULT_HISTORY_BUDGET_PERCENTAGE),
         /** Timeout for each historian prompt call in milliseconds (default: 300000) */
         historian_timeout_ms: z.number().min(60_000).default(DEFAULT_HISTORIAN_TIMEOUT_MS),
         /** Embedding provider configuration */

@@ -15,6 +15,7 @@ import {
     isDatabasePersisted,
     openDatabase,
 } from "../features/magic-context/storage";
+import { createCtxExpandTools } from "../tools/ctx-expand";
 import { createCtxMemoryTools } from "../tools/ctx-memory";
 import { createCtxNoteTools } from "../tools/ctx-note";
 import { createCtxRecallTools } from "../tools/ctx-recall";
@@ -70,6 +71,7 @@ export function createToolRegistry(args: {
             db,
             protectedTags: pluginConfig.protected_tags ?? DEFAULT_PROTECTED_TAGS,
         }),
+        ...createCtxExpandTools(),
         ...createCtxNoteTools({ db }),
         ...(memoryEnabled
             ? {

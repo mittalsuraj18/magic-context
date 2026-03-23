@@ -13,7 +13,6 @@ export interface ParsedFact {
 export interface ParsedCompartmentOutput {
     compartments: ParsedCompartment[];
     facts: ParsedFact[];
-    notes: string[];
     unprocessedFrom: number | null;
 }
 
@@ -22,13 +21,11 @@ const COMPARTMENT_REGEX =
 const CATEGORY_BLOCK_REGEX =
     /<(WORKFLOW_RULES|ARCHITECTURE_DECISIONS|CONSTRAINTS|CONFIG_DEFAULTS|KNOWN_ISSUES|ENVIRONMENT|NAMING|USER_PREFERENCES|USER_DIRECTIVES)>(.*?)<\/\1>/gs;
 const FACT_ITEM_REGEX = /^\s*\*\s*(.+)$/gm;
-const SESSION_NOTES_REGEX = /<session_notes>(.*?)<\/session_notes>/s;
 const UNPROCESSED_REGEX = /<unprocessed_from>(\d+)<\/unprocessed_from>/;
 
 export function parseCompartmentOutput(text: string): ParsedCompartmentOutput {
     const compartments: ParsedCompartment[] = [];
     const facts: ParsedFact[] = [];
-    const notes: string[] = [];
 
     for (const match of text.matchAll(COMPARTMENT_REGEX)) {
         const startMessage = parseInt(match[1], 10);
@@ -52,22 +49,12 @@ export function parseCompartmentOutput(text: string): ParsedCompartmentOutput {
         }
     }
 
-    const sessionNotesMatch = text.match(SESSION_NOTES_REGEX);
-    if (sessionNotesMatch) {
-        for (const itemMatch of sessionNotesMatch[1].matchAll(FACT_ITEM_REGEX)) {
-            const content = unescapeXml(itemMatch[1].trim());
-            if (content) {
-                notes.push(content);
-            }
-        }
-    }
-
     const unprocessedMatch = text.match(UNPROCESSED_REGEX);
     const unprocessedFrom = unprocessedMatch ? parseInt(unprocessedMatch[1], 10) : null;
 
     compartments.sort((a, b) => a.startMessage - b.startMessage);
 
-    return { compartments, facts, notes, unprocessedFrom };
+    return { compartments, facts, unprocessedFrom };
 }
 
 function unescapeXml(s: string): string {

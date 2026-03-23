@@ -1,5 +1,4 @@
 import type { Database } from "bun:sqlite";
-import type { SessionNote } from "./storage-notes";
 
 export interface Compartment {
     id: number;
@@ -166,13 +165,11 @@ export function replaceAllCompartmentState(
     sessionId: string,
     compartments: CompartmentInput[],
     facts: Array<{ category: string; content: string }>,
-    notes: string[] = [],
 ): void {
     const now = Date.now();
     db.transaction(() => {
         db.prepare("DELETE FROM compartments WHERE session_id = ?").run(sessionId);
         db.prepare("DELETE FROM session_facts WHERE session_id = ?").run(sessionId);
-        db.prepare("DELETE FROM session_notes WHERE session_id = ?").run(sessionId);
 
         const compartmentStmt = db.prepare(
             "INSERT INTO compartments (session_id, sequence, start_message, end_message, start_message_id, end_message_id, title, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -198,13 +195,6 @@ export function replaceAllCompartmentState(
             factStmt.run(sessionId, f.category, f.content, now, now);
         }
 
-        const noteStmt = db.prepare(
-            "INSERT INTO session_notes (session_id, content, created_at) VALUES (?, ?, ?)",
-        );
-        for (const note of notes) {
-            noteStmt.run(sessionId, note, now);
-        }
-
         // Clear cached memory block so next injection renders fresh (historian run already busts cache)
         db.prepare(
             "UPDATE session_meta SET memory_block_cache = '', memory_block_count = 0 WHERE session_id = ?",
@@ -215,7 +205,6 @@ export function replaceAllCompartmentState(
 export function buildCompartmentBlock(
     compartments: Compartment[],
     facts: SessionFact[],
-    notes: SessionNote[] = [],
     memoryBlock?: string,
 ): string {
     const lines: string[] = [];
@@ -226,7 +215,9 @@ export function buildCompartmentBlock(
     }
 
     for (const c of compartments) {
-        lines.push(`<compartment title="${escapeXmlAttr(c.title)}">`);
+        lines.push(
+            `<compartment start="${c.startMessage}" end="${c.endMessage}" title="${escapeXmlAttr(c.title)}">`,
+        );
         lines.push(escapeXmlContent(c.content));
         lines.push("</compartment>");
         lines.push("");
@@ -247,15 +238,181 @@ export function buildCompartmentBlock(
         lines.push("");
     }
 
-    if (notes.length > 0) {
-        lines.push("SESSION_NOTES:");
-        for (const note of notes) {
-            lines.push(`* ${escapeXmlContent(note.content)}`);
-        }
-        lines.push("");
-    }
-
     return lines.join("\n").trimEnd();
+}
+
+// ── Recomp staging ──────────────────────────────────────────────────────────
+
+export interface RecompStaging {
+    compartments: CompartmentInput[];
+    facts: Array<{ category: string; content: string }>;
+    passCount: number;
+    lastEndMessage: number;
+}
+
+/** Append one pass's results to the staging tables. */
+export function saveRecompStagingPass(
+    db: Database,
+    sessionId: string,
+    passNumber: number,
+    compartments: CompartmentInput[],
+    facts: Array<{ category: string; content: string }>,
+): void {
+    const now = Date.now();
+    db.transaction(() => {
+        // Facts are replaced wholesale each pass (historian rewrites full fact list)
+        db.prepare("DELETE FROM recomp_facts WHERE session_id = ?").run(sessionId);
+
+        const compartmentStmt = db.prepare(
+            "INSERT OR REPLACE INTO recomp_compartments (session_id, sequence, start_message, end_message, start_message_id, end_message_id, title, content, pass_number, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        );
+        for (const c of compartments) {
+            compartmentStmt.run(
+                sessionId,
+                c.sequence,
+                c.startMessage,
+                c.endMessage,
+                c.startMessageId,
+                c.endMessageId,
+                c.title,
+                c.content,
+                passNumber,
+                now,
+            );
+        }
+
+        const factStmt = db.prepare(
+            "INSERT INTO recomp_facts (session_id, category, content, pass_number, created_at) VALUES (?, ?, ?, ?, ?)",
+        );
+        for (const f of facts) {
+            factStmt.run(sessionId, f.category, f.content, passNumber, now);
+        }
+    })();
+}
+
+/** Read existing staging data for resume. Returns null if no staging exists. */
+export function getRecompStaging(db: Database, sessionId: string): RecompStaging | null {
+    const compartmentRows = db
+        .prepare("SELECT * FROM recomp_compartments WHERE session_id = ? ORDER BY sequence ASC")
+        .all(sessionId)
+        .filter(isRecompCompartmentRow);
+
+    if (compartmentRows.length === 0) return null;
+
+    const compartments: CompartmentInput[] = compartmentRows.map((row) => ({
+        sequence: row.sequence,
+        startMessage: row.start_message,
+        endMessage: row.end_message,
+        startMessageId: row.start_message_id,
+        endMessageId: row.end_message_id,
+        title: row.title,
+        content: row.content,
+    }));
+
+    const factRows = db
+        .prepare("SELECT category, content FROM recomp_facts WHERE session_id = ?")
+        .all(sessionId) as Array<{ category: string; content: string }>;
+
+    const maxPass = Math.max(...compartmentRows.map((r) => r.pass_number));
+    const lastEnd = compartmentRows[compartmentRows.length - 1]?.end_message ?? 0;
+
+    return {
+        compartments,
+        facts: factRows,
+        passCount: maxPass,
+        lastEndMessage: lastEnd,
+    };
+}
+
+/** Atomically promote staging → real tables, then clear staging. */
+export function promoteRecompStaging(
+    db: Database,
+    sessionId: string,
+): {
+    compartments: CompartmentInput[];
+    facts: Array<{ category: string; content: string }>;
+} | null {
+    const staging = getRecompStaging(db, sessionId);
+    if (!staging || staging.compartments.length === 0) return null;
+
+    const now = Date.now();
+    db.transaction(() => {
+        // Replace real tables
+        db.prepare("DELETE FROM compartments WHERE session_id = ?").run(sessionId);
+        db.prepare("DELETE FROM session_facts WHERE session_id = ?").run(sessionId);
+
+        const compartmentStmt = db.prepare(
+            "INSERT INTO compartments (session_id, sequence, start_message, end_message, start_message_id, end_message_id, title, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        );
+        for (const c of staging.compartments) {
+            compartmentStmt.run(
+                sessionId,
+                c.sequence,
+                c.startMessage,
+                c.endMessage,
+                c.startMessageId,
+                c.endMessageId,
+                c.title,
+                c.content,
+                now,
+            );
+        }
+
+        const factStmt = db.prepare(
+            "INSERT INTO session_facts (session_id, category, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        );
+        for (const f of staging.facts) {
+            factStmt.run(sessionId, f.category, f.content, now, now);
+        }
+
+        // Clear staging
+        db.prepare("DELETE FROM recomp_compartments WHERE session_id = ?").run(sessionId);
+        db.prepare("DELETE FROM recomp_facts WHERE session_id = ?").run(sessionId);
+
+        // Clear cached memory block
+        db.prepare(
+            "UPDATE session_meta SET memory_block_cache = '', memory_block_count = 0 WHERE session_id = ?",
+        ).run(sessionId);
+    })();
+
+    return { compartments: staging.compartments, facts: staging.facts };
+}
+
+/** Clear staging tables for a session (on cancel/abandon or after successful promote). */
+export function clearRecompStaging(db: Database, sessionId: string): void {
+    db.transaction(() => {
+        db.prepare("DELETE FROM recomp_compartments WHERE session_id = ?").run(sessionId);
+        db.prepare("DELETE FROM recomp_facts WHERE session_id = ?").run(sessionId);
+    })();
+}
+
+interface RecompCompartmentRow {
+    id: number;
+    session_id: string;
+    sequence: number;
+    start_message: number;
+    end_message: number;
+    start_message_id: string;
+    end_message_id: string;
+    title: string;
+    content: string;
+    pass_number: number;
+    created_at: number;
+}
+
+function isRecompCompartmentRow(row: unknown): row is RecompCompartmentRow {
+    if (row === null || typeof row !== "object") return false;
+    const candidate = row as Record<string, unknown>;
+    return (
+        typeof candidate.id === "number" &&
+        typeof candidate.session_id === "string" &&
+        typeof candidate.sequence === "number" &&
+        typeof candidate.start_message === "number" &&
+        typeof candidate.end_message === "number" &&
+        typeof candidate.title === "string" &&
+        typeof candidate.content === "string" &&
+        typeof candidate.pass_number === "number"
+    );
 }
 
 export function escapeXmlAttr(s: string): string {

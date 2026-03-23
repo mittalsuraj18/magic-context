@@ -27,7 +27,7 @@ describe("parseCompartmentOutput", () => {
         ]);
     });
 
-    it("parses USER_DIRECTIVES facts and session notes", () => {
+    it("parses USER_DIRECTIVES facts", () => {
         const parsed = parseCompartmentOutput(`
 <output>
 <compartments>
@@ -38,9 +38,6 @@ describe("parseCompartmentOutput", () => {
 * Keep the magic-context rename broad and user-facing.
 </USER_DIRECTIVES>
 </facts>
-<session_notes>
-* Remember to keep notes terse after historian rewrites them.
-</session_notes>
 <meta>
 <messages_processed>3-4</messages_processed>
 </meta>
@@ -50,12 +47,9 @@ describe("parseCompartmentOutput", () => {
             category: "USER_DIRECTIVES",
             content: "Keep the magic-context rename broad and user-facing.",
         });
-        expect(parsed.notes).toEqual([
-            "Remember to keep notes terse after historian rewrites them.",
-        ]);
     });
 
-    it("unescapes escaped XML content in titles, compartments, facts, and notes", () => {
+    it("unescapes escaped XML content in titles, compartments, and facts", () => {
         const parsed = parseCompartmentOutput(`
 <output>
 <compartments>
@@ -66,9 +60,6 @@ describe("parseCompartmentOutput", () => {
 * Preserve Sam&apos;s decision &amp; keep &lt;magic-context&gt; wording.
 </USER_DIRECTIVES>
 </facts>
-<session_notes>
-* Don&apos;t lose &lt;ctx_reduce&gt; reminders.
-</session_notes>
 <meta>
 <messages_processed>5-6</messages_processed>
 </meta>
@@ -86,6 +77,5 @@ describe("parseCompartmentOutput", () => {
             category: "USER_DIRECTIVES",
             content: "Preserve Sam's decision & keep <magic-context> wording.",
         });
-        expect(parsed.notes).toEqual(["Don't lose <ctx_reduce> reminders."]);
     });
 });

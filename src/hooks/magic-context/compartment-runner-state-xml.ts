@@ -1,6 +1,4 @@
-import type { Database } from "bun:sqlite";
 import { escapeXmlAttr, escapeXmlContent } from "../../features/magic-context/compartment-storage";
-import { getSessionNotes } from "../../features/magic-context/storage";
 import type { CandidateCompartment } from "./compartment-runner-types";
 
 export function buildExistingStateXml(
@@ -13,9 +11,18 @@ export function buildExistingStateXml(
         content: string;
     }>,
     facts: Array<{ category: string; content: string }>,
-    notes: string[],
+    memoryBlock?: string,
 ): string {
     const lines: string[] = [];
+
+    // Project memories are read-only reference for deduplication — historian must not modify them
+    if (memoryBlock) {
+        lines.push(
+            "<!-- Project memories below are READ-ONLY reference. Do NOT emit them in output. Drop any session fact already covered by a project memory. -->",
+        );
+        lines.push(memoryBlock);
+        lines.push("");
+    }
 
     for (const c of compartments) {
         lines.push(
@@ -35,7 +42,7 @@ export function buildExistingStateXml(
 
     if (factsByCategory.size > 0) {
         lines.push(
-            "<!-- Rewrite all facts below into canonical present-tense operational form. Do not copy wording verbatim. Drop stale or task-local facts. -->",
+            "<!-- Rewrite all facts below into canonical present-tense operational form. Do not copy wording verbatim. Drop stale or task-local facts. Drop facts already covered by project memories above. -->",
         );
         lines.push("");
     }
@@ -47,39 +54,7 @@ export function buildExistingStateXml(
         lines.push("");
     }
 
-    if (notes.length > 0) {
-        lines.push(
-            "<!-- Rewrite notes into concise session scratchpad items only when they remain useful after updating compartments and facts. -->",
-        );
-        lines.push("");
-        lines.push("<session_notes>");
-        for (const note of notes) lines.push(`* ${escapeXmlContent(note)}`);
-        lines.push("</session_notes>");
-        lines.push("");
-    }
-
     return lines.join("\n");
-}
-
-export function resolveNotesToPersist(
-    db: Database,
-    sessionId: string,
-    snapshotNotes: string[],
-    historianNotes: string[],
-): string[] {
-    const liveNotes = getSessionNotes(db, sessionId).map((note) => note.content);
-    if (noteListsEqual(liveNotes, snapshotNotes)) {
-        return historianNotes;
-    }
-    return liveNotes;
-}
-
-function noteListsEqual(left: string[], right: string[]): boolean {
-    if (left.length !== right.length) {
-        return false;
-    }
-
-    return left.every((value, index) => value === right[index]);
 }
 
 export function mergePriorCompartments(

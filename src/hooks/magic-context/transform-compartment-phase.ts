@@ -22,6 +22,7 @@ interface RunCompartmentPhaseArgs {
     sessionId: string;
     resolvedSessionId: string;
     compartmentTokenBudget?: number;
+    historyBudgetTokens?: number;
     historianTimeoutMs?: number;
     compartmentDirectory: string;
     messages: MessageLike[];
@@ -99,6 +100,7 @@ export async function runCompartmentPhase(args: RunCompartmentPhaseArgs): Promis
                 db: args.db,
                 sessionId: args.sessionId,
                 tokenBudget: args.compartmentTokenBudget ?? DEFAULT_COMPARTMENT_TOKEN_BUDGET,
+                historyBudgetTokens: args.historyBudgetTokens,
                 historianTimeoutMs: args.historianTimeoutMs,
                 directory: args.compartmentDirectory,
                 getNotificationParams: args.getNotificationParams,
@@ -132,6 +134,7 @@ export async function runCompartmentPhase(args: RunCompartmentPhaseArgs): Promis
                 db: args.db,
                 sessionId: args.sessionId,
                 tokenBudget: args.compartmentTokenBudget ?? DEFAULT_COMPARTMENT_TOKEN_BUDGET,
+                historyBudgetTokens: args.historyBudgetTokens,
                 historianTimeoutMs: args.historianTimeoutMs,
                 directory: args.compartmentDirectory,
                 getNotificationParams: args.getNotificationParams,

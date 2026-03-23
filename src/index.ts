@@ -1,5 +1,6 @@
 import type { Plugin } from "@opencode-ai/plugin";
 import { loadPluginConfig } from "./config";
+import { COMPARTMENT_AGENT_SYSTEM_PROMPT } from "./hooks/magic-context/compartment-prompt";
 import { createEventHandler } from "./plugin/event";
 import { createSessionHooks } from "./plugin/hooks/create-session-hooks";
 import { createMessagesTransformHandler } from "./plugin/messages-transform";
@@ -76,6 +77,7 @@ const plugin: Plugin = async (ctx) => {
                 ...(pluginConfig.historian
                     ? {
                           historian: {
+                              prompt: COMPARTMENT_AGENT_SYSTEM_PROMPT,
                               ...pluginConfig.historian,
                               mode: "subagent",
                               hidden: true,

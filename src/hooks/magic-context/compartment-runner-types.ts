@@ -9,6 +9,7 @@ export interface CompartmentRunnerDeps {
     tokenBudget: number;
     historianTimeoutMs?: number;
     directory: string;
+    historyBudgetTokens?: number;
     getNotificationParams?: () => NotificationParams;
 }
 
@@ -33,7 +34,6 @@ export interface ValidatedHistorianPassResult {
     ok: boolean;
     compartments?: CandidateCompartment[];
     facts?: Array<{ category: string; content: string }>;
-    notes?: string[];
     mode?: "chunk" | "full";
     error?: string;
 }

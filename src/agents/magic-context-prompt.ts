@@ -18,7 +18,7 @@ const BASE_INTRO = (
 Use \`ctx_reduce\` to manage context size. It supports one operation:
 - \`drop\`: Remove entirely (best for tool outputs you already acted on).
 Syntax: "3-5", "1,2,9", or "1-5,8,12-15". Last ${protectedTags} tags are protected.
-Use \`ctx_note\` to save short session notes for durable goals, constraints, decisions, and reminders you want historian to keep clean across long runs.
+Use \`ctx_note\` to save short session notes for durable goals, constraints, decisions, and reminders you want to persist for this session.
 Use \`ctx_memory\` to manage cross-session project memories. Write new memories, delete stale ones, promote important ones to permanent status, or list stored memories by category. Memories persist across sessions and are automatically injected into new sessions.
 Use \`ctx_recall\` to search cross-session project memories using natural language queries. Returns relevant memories ranked by semantic + keyword relevance. Use this to find previously stored architecture decisions, constraints, user preferences, config defaults, and other project knowledge.
 NEVER drop large ranges blindly (e.g., "1-50"). Review each tag before deciding.
@@ -155,12 +155,12 @@ const AGENT_SECTIONS: Record<AgentType, string> = {
 
 /** Signature strings used to detect known agents from system prompt content. */
 const AGENT_SIGNATURES: [AgentType, string][] = [
+    ["athena-junior", "athena-junior"],
     ["sisyphus-junior", "Sisyphus-Junior"],
     ["sisyphus", "You are Sisyphus"],
     ["atlas", "You are Atlas"],
     ["hephaestus", "You are Hephaestus"],
     ["oracle", "You are Oracle"],
-    ["athena-junior", "athena-junior"],
     ["athena", "You are Athena"],
 ];
 

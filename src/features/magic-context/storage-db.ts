@@ -158,8 +158,34 @@ export function initializeDatabase(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_pending_ops_session_tag_id ON pending_ops(session_id, tag_id);
     CREATE INDEX IF NOT EXISTS idx_source_contents_session ON source_contents(session_id);
     CREATE INDEX IF NOT EXISTS idx_session_meta_session ON session_meta(session_id);
+    CREATE TABLE IF NOT EXISTS recomp_compartments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      sequence INTEGER NOT NULL,
+      start_message INTEGER NOT NULL,
+      end_message INTEGER NOT NULL,
+      start_message_id TEXT DEFAULT '',
+      end_message_id TEXT DEFAULT '',
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      pass_number INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      UNIQUE(session_id, sequence)
+    );
+
+    CREATE TABLE IF NOT EXISTS recomp_facts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      category TEXT NOT NULL,
+      content TEXT NOT NULL,
+      pass_number INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_compartments_session ON compartments(session_id);
     CREATE INDEX IF NOT EXISTS idx_session_facts_session ON session_facts(session_id);
+    CREATE INDEX IF NOT EXISTS idx_recomp_compartments_session ON recomp_compartments(session_id);
+    CREATE INDEX IF NOT EXISTS idx_recomp_facts_session ON recomp_facts(session_id);
     CREATE INDEX IF NOT EXISTS idx_session_notes_session ON session_notes(session_id);
     CREATE INDEX IF NOT EXISTS idx_memories_project_status_category ON memories(project_path, status, category);
     CREATE INDEX IF NOT EXISTS idx_memories_project_status_expires ON memories(project_path, status, expires_at);

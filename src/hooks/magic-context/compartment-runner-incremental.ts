@@ -5,20 +5,18 @@ import {
 } from "../../features/magic-context/compartment-storage";
 import { promoteSessionFactsToMemory } from "../../features/magic-context/memory";
 import { resolveProjectIdentity } from "../../features/magic-context/memory/project-identity";
-import { getSessionNotes } from "../../features/magic-context/storage";
+import { getMemoriesByProject } from "../../features/magic-context/memory/storage-memory";
 import { updateSessionMeta } from "../../features/magic-context/storage-meta";
 import { normalizeSDKResponse } from "../../shared";
 import { getErrorMessage } from "../../shared/error-message";
 import { buildCompartmentAgentPrompt } from "./compartment-prompt";
+import { runCompressionPassIfNeeded } from "./compartment-runner-compressor";
 import { queueDropsForCompartmentalizedMessages } from "./compartment-runner-drop-queue";
 import { runValidatedHistorianPass } from "./compartment-runner-historian";
-import {
-    buildExistingStateXml,
-    mergePriorCompartments,
-    resolveNotesToPersist,
-} from "./compartment-runner-state-xml";
+import { buildExistingStateXml, mergePriorCompartments } from "./compartment-runner-state-xml";
 import type { CompartmentRunnerDeps } from "./compartment-runner-types";
 import { validateChunkCoverage, validateStoredCompartments } from "./compartment-runner-validation";
+import { renderMemoryBlock } from "./inject-compartments";
 import { getProtectedTailStartOrdinal, readSessionChunk } from "./read-session-chunk";
 import { sendIgnoredMessage } from "./send-session-notification";
 
@@ -45,11 +43,9 @@ export async function runCompartmentAgent(deps: CompartmentRunnerDeps): Promise<
     try {
         const existingCompartments = getCompartments(db, sessionId);
         const existingFacts = getSessionFacts(db, sessionId);
-        const existingNotes = getSessionNotes(db, sessionId);
 
         const priorCompartments = existingCompartments;
         const priorFacts = existingFacts;
-        const priorNotes = existingNotes.map((note) => note.content);
 
         const existingValidationError = validateStoredCompartments(priorCompartments);
         if (existingValidationError) {
@@ -82,10 +78,17 @@ export async function runCompartmentAgent(deps: CompartmentRunnerDeps): Promise<
             return;
         }
 
+        // Render project memories as read-only reference so historian can dedup facts against them
+        const projectPath = resolveProjectIdentity(directory ?? process.cwd());
+        const memories = getMemoriesByProject(db, projectPath, ["active", "permanent"]);
+        const memoryBlock = renderMemoryBlock(memories) ?? undefined;
+
         const existingState =
-            priorCompartments.length > 0 || priorFacts.length > 0 || priorNotes.length > 0
-                ? buildExistingStateXml(priorCompartments, priorFacts, priorNotes)
-                : "This is your first run. No existing state.";
+            priorCompartments.length > 0 || priorFacts.length > 0
+                ? buildExistingStateXml(priorCompartments, priorFacts, memoryBlock)
+                : memoryBlock
+                  ? `${memoryBlock}\n\nThis is your first run. No existing compartments or facts.`
+                  : "This is your first run. No existing state.";
 
         const prompt = buildCompartmentAgentPrompt(
             existingState,
@@ -126,13 +129,6 @@ export async function runCompartmentAgent(deps: CompartmentRunnerDeps): Promise<
                 ? newCompartments
                 : mergePriorCompartments(priorCompartments, newCompartments);
 
-        const notesToPersist = resolveNotesToPersist(
-            db,
-            sessionId,
-            priorNotes,
-            validatedPass.notes ?? [],
-        );
-
         const nextOffset = (allCompartments[allCompartments.length - 1]?.endMessage ?? 0) + 1;
         if (nextOffset <= offset) {
             await notifyHistorianIssue(
@@ -141,13 +137,7 @@ export async function runCompartmentAgent(deps: CompartmentRunnerDeps): Promise<
             return;
         }
 
-        replaceAllCompartmentState(
-            db,
-            sessionId,
-            allCompartments,
-            validatedPass.facts ?? [],
-            notesToPersist,
-        );
+        replaceAllCompartmentState(db, sessionId, allCompartments, validatedPass.facts ?? []);
         promoteSessionFactsToMemory(
             db,
             sessionId,
@@ -157,6 +147,19 @@ export async function runCompartmentAgent(deps: CompartmentRunnerDeps): Promise<
 
         const lastCompartmentEnd = allCompartments[allCompartments.length - 1].endMessage;
         queueDropsForCompartmentalizedMessages(db, sessionId, lastCompartmentEnd);
+
+        // Run compression pass if history block exceeds budget
+        if (deps.historyBudgetTokens && deps.historyBudgetTokens > 0) {
+            await runCompressionPassIfNeeded({
+                client,
+                db,
+                sessionId,
+                directory: sessionDirectory,
+                historyBudgetTokens: deps.historyBudgetTokens,
+                historianTimeoutMs,
+            });
+        }
+
         updateSessionMeta(db, sessionId, { compartmentInProgress: false });
         completedSuccessfully = true;
     } catch (error: unknown) {

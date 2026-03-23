@@ -8,7 +8,6 @@ import {
 import { CATEGORY_PRIORITY } from "../../features/magic-context/memory/constants";
 import { getMemoriesByProject } from "../../features/magic-context/memory/storage-memory";
 import type { Memory, MemoryCategory } from "../../features/magic-context/memory/types";
-import { getSessionNotes } from "../../features/magic-context/storage";
 import { log } from "../../shared/logger";
 import type { MessageLike } from "./tag-messages";
 
@@ -18,7 +17,6 @@ export interface PreparedCompartmentInjection {
     compartmentCount: number;
     skippedVisibleMessages: number;
     factCount: number;
-    noteCount: number;
     memoryCount: number;
 }
 
@@ -29,7 +27,7 @@ export interface CompartmentInjectionResult {
     skippedVisibleMessages: number;
 }
 
-function renderMemoryBlock(memories: Memory[]): string | null {
+export function renderMemoryBlock(memories: Memory[]): string | null {
     const byCategory = new Map<MemoryCategory, Memory[]>();
     for (const m of memories) {
         const existing = byCategory.get(m.category);
@@ -110,7 +108,6 @@ export function prepareCompartmentInjection(
     }
 
     const facts = getSessionFacts(db, sessionId);
-    const notes = getSessionNotes(db, sessionId);
 
     let memoryBlock: string | undefined;
     let memoryCount = 0;
@@ -141,7 +138,7 @@ export function prepareCompartmentInjection(
         }
     }
 
-    const block = buildCompartmentBlock(compartments, facts, notes, memoryBlock);
+    const block = buildCompartmentBlock(compartments, facts, memoryBlock);
     const lastCompartment = compartments[compartments.length - 1];
     const lastEnd = lastCompartment.endMessage;
     const lastEndMessageId = lastCompartment.endMessageId;
@@ -161,7 +158,6 @@ export function prepareCompartmentInjection(
             compartmentCount: compartments.length,
             skippedVisibleMessages: 0,
             factCount: facts.length,
-            noteCount: notes.length,
             memoryCount,
         };
     }
@@ -180,7 +176,6 @@ export function prepareCompartmentInjection(
         compartmentCount: compartments.length,
         skippedVisibleMessages,
         factCount: facts.length,
-        noteCount: notes.length,
         memoryCount,
     };
 }
@@ -204,7 +199,7 @@ export function renderCompartmentInjection(
 
     const memoryLabel = prepared.memoryCount > 0 ? ` + ${prepared.memoryCount} memories` : "";
     log(
-        `[magic-context] injected ${prepared.compartmentCount} compartments + ${prepared.factCount} facts + ${prepared.noteCount} notes${memoryLabel} into message[0]`,
+        `[magic-context] injected ${prepared.compartmentCount} compartments + ${prepared.factCount} facts${memoryLabel} into message[0]`,
     );
 
     return {
@@ -219,7 +214,7 @@ function findFirstTextPart(parts: unknown[]): { type: string; text: string } | n
     for (const part of parts) {
         if (part === null || typeof part !== "object") continue;
         const p = part as Record<string, unknown>;
-        if (p.type === "text" && typeof p.text === "string") {
+        if (p.type === "text" && typeof p.text === "string" && !p.ignored) {
             return p as unknown as { type: string; text: string };
         }
     }
