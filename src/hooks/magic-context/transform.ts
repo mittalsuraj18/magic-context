@@ -203,6 +203,8 @@ export function createTransform(deps: TransformDeps) {
             contextUsage,
             sessionId,
         );
+        const isCacheBusting =
+            deps.flushedSessions.has(sessionId) || schedulerDecision === "execute";
         const compartmentPhase = await runCompartmentPhase({
             canRunCompartments,
             fullFeatureMode,
@@ -231,6 +233,7 @@ export function createTransform(deps: TransformDeps) {
             getNotificationParams: deps.getNotificationParams
                 ? () => deps.getNotificationParams!(sessionId)
                 : undefined,
+            cacheAlreadyBusting: isCacheBusting,
         });
         pendingCompartmentInjection = compartmentPhase.pendingCompartmentInjection;
         const awaitedCompartmentRun = compartmentPhase.awaitedCompartmentRun;

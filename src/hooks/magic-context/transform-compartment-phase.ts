@@ -32,6 +32,8 @@ interface RunCompartmentPhaseArgs {
     projectPath?: string;
     injectionBudgetTokens?: number;
     getNotificationParams?: () => import("./send-session-notification").NotificationParams;
+    /** True when this pass is already cache-busting (flush or scheduler execute). */
+    cacheAlreadyBusting?: boolean;
 }
 
 export async function runCompartmentPhase(args: RunCompartmentPhaseArgs): Promise<{
@@ -166,11 +168,14 @@ export async function runCompartmentPhase(args: RunCompartmentPhaseArgs): Promis
     // But if historian hasn't fired (e.g., usage stayed low due to aggressive
     // heuristic cleanup from system-prompt flushes), the history block can
     // exceed the budget indefinitely. Run the compressor independently when:
+    //   - cache is already busting (flush or scheduler execute) — never on
+    //     cache-stable passes, as the compressor rewrites message[0]
     //   - budget is configured
     //   - client is available (compressor creates child sessions)
     //   - no historian is currently running
     //   - no historian ran this pass (compressor already fires post-historian)
     if (
+        args.cacheAlreadyBusting &&
         args.historyBudgetTokens &&
         args.historyBudgetTokens > 0 &&
         args.client &&
