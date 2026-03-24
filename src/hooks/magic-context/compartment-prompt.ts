@@ -22,7 +22,7 @@ User message preservation:
 - Limit to 3-5 U: lines per compartment — keep only the most important ones.
 
 Compartment example:
-<compartment id="c-001" start="50" end="120" title="Built the LSP stack">
+<compartment start="50" end="120" title="Built the LSP stack">
 U: We need inline diagnostics on every edit, not just on-demand
 Implemented in-process LSP client with per-server reader threads and crossbeam-channel delivery. Added inline edit diagnostics to write, edit, and apply_patch. commits: a3f891, b22c4e
 U: Ship this as 0.2.0
@@ -73,7 +73,7 @@ Input notes:
 Output valid XML only in this shape:
 <output>
 <compartments>
-<compartment id="c-NNN" start="FIRST" end="LAST" title="short title">
+<compartment start="FIRST" end="LAST" title="short title">
 U: Verbatim high-signal user message
 Summary text describing what was done and why.
 U: Another high-signal user message if applicable
@@ -111,7 +111,7 @@ Rules:
 Output valid XML only in this shape:
 <output>
 <compartments>
-<compartment id="c-NNN" start="FIRST" end="LAST" title="short title">Compressed summary text.</compartment>
+<compartment start="FIRST" end="LAST" title="short title">Compressed summary text.</compartment>
 </compartments>
 </output>`;
 
