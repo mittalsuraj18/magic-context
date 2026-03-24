@@ -47,20 +47,22 @@ Higher-tier models with longer cache windows benefit from a longer TTL. Setting 
 | `iteration_nudge_threshold` | `number` | `15` | Consecutive assistant turns without user input before an iteration nudge. |
 | `compartment_token_budget` | `number` | `20000` | Token budget for historian input chunks. |
 | `historian_timeout_ms` | `number` | `300000` | Timeout per historian call (ms). |
+| `history_budget_percentage` | `number` (0–1) | `0.15` | Fraction of usable context reserved for the history block. Triggers compression when exceeded. |
 
 ---
 
 ## `historian`
 
-Configures the background historian. Optional — the plugin has a built-in default chain.
+Configures the background historian agent that compresses session history into compartments. Optional — the plugin has a built-in default fallback chain.
 
 ```jsonc
 {
   "historian": {
-    "model": "anthropic/claude-haiku-4",
-    "fallback_models": ["anthropic/claude-3-5-haiku"],
-    "temperature": 0.1,
-    "maxTokens": 4096
+    "model": "github-copilot/gpt-5.4",
+    "fallback_models": [
+      "anthropic/claude-sonnet-4-6",
+      "bailian-coding-plan/kimi-k2.5"
+    ]
   }
 }
 ```
@@ -70,9 +72,76 @@ Configures the background historian. Optional — the plugin has a built-in defa
 | `model` | `string` | Primary model. |
 | `fallback_models` | `string` or `string[]` | Models to try if the primary fails or is rate-limited. |
 | `temperature` | `number` (0–2) | Sampling temperature. |
-| `maxTokens` | `number` | Max tokens per response. |
 | `variant` | `string` | Agent variant. |
 | `prompt` | `string` | Custom system prompt override. |
+
+---
+
+## `dreamer`
+
+Configures the dreamer agent that maintains cross-session memory quality. Same shape as `historian`. Dreamer creates ephemeral child sessions inside OpenCode to run each maintenance task.
+
+```jsonc
+{
+  "dreamer": {
+    "model": "github-copilot/gpt-5.4",
+    "fallback_models": [
+      "anthropic/claude-sonnet-4-6"
+    ]
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `model` | `string` | Primary model. |
+| `fallback_models` | `string` or `string[]` | Fallback models. |
+| `temperature` | `number` (0–2) | Sampling temperature. |
+| `variant` | `string` | Agent variant. |
+| `prompt` | `string` | Custom system prompt override. |
+
+---
+
+## `dreaming`
+
+Controls when and how the dreamer runs its maintenance tasks.
+
+```jsonc
+{
+  "dreaming": {
+    "enabled": true,
+    "schedule": "02:00-06:00",
+    "tasks": ["consolidate", "verify", "archive-stale", "improve", "maintain-docs"]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `false` | Enable scheduled dreaming. |
+| `schedule` | `string` | `"02:00-06:00"` | Time window for overnight runs (24h, supports overnight like `"23:00-05:00"`). |
+| `max_runtime_minutes` | `number` | `120` | Max total runtime per dream session. |
+| `task_timeout_minutes` | `number` | `20` | Minutes allocated per individual task. |
+| `tasks` | `string[]` | `["consolidate", "verify", "archive-stale", "improve"]` | Tasks to run, in order. |
+
+### Available tasks
+
+| Task | What it does |
+|------|-------------|
+| `consolidate` | Find semantically duplicate memories and merge each cluster into one canonical fact. |
+| `verify` | Check CONFIG_DEFAULTS, ARCHITECTURE_DECISIONS, and ENVIRONMENT memories against actual code. |
+| `archive-stale` | Archive memories that reference removed features, old paths, or discontinued workflows. |
+| `improve` | Rewrite verbose or narrative memories into terse operational statements. |
+| `maintain-docs` | Keep `ARCHITECTURE.md` and `STRUCTURE.md` at project root synchronized with the codebase. |
+
+### How scheduling works
+
+The schedule check piggybacks on `message.updated` events with an hourly debounce. When the current time falls inside the configured window:
+
+1. The scheduler scans the memory store for projects with activity since the last dream.
+2. Eligible projects are enqueued into a SQLite-backed dream queue.
+3. The queue consumer processes one project at a time, creating a child session per task.
+4. `/ctx-dream` also uses the same queue — it enqueues the current project and immediately processes.
 
 ---
 
@@ -102,20 +171,20 @@ Controls semantic search for cross-session memories.
 
 ## `memory`
 
-Cross-session memory settings. All memories are scoped to the current project (identified by git root commit hash).
+Cross-session memory settings. All memories are scoped to the current project (identified by git root commit hash, with directory-hash fallback for non-git projects).
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `boolean` | `true` | Enable cross-session memory. |
-| `injection_budget_tokens` | `number` (500–20000) | `4000` | Token budget for memory injection. |
-| `auto_promote` | `boolean` | `true` | Promote eligible session facts to memory automatically. |
+| `injection_budget_tokens` | `number` (500–20000) | `4000` | Token budget for memory injection into `<session-history>`. |
+| `auto_promote` | `boolean` | `true` | Promote eligible session facts to memory automatically after historian runs. |
 | `retrieval_count_promotion_threshold` | `number` | `3` | Retrievals needed before a memory is auto-promoted to permanent. |
 
 ---
 
 ## `sidekick`
 
-Optional lightweight local agent for memory retrieval augmentation. Disabled by default.
+Optional prompt augmenter that runs on `/ctx-aug`. Uses an OpenAI-compatible endpoint (local or remote) with tool-calling to search memories and produce a context briefing.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -129,19 +198,15 @@ Optional lightweight local agent for memory retrieval augmentation. Disabled by 
 
 ---
 
-## `dreaming`
+## Commands
 
-Background memory maintenance on a schedule (typically overnight). Requires a local LLM.
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `enabled` | `boolean` | `false` | Enable dreaming. |
-| `schedule` | `string` | `"02:00-06:00"` | Time window (24h format). |
-| `max_runtime_minutes` | `number` | `120` | Max runtime per session. |
-| `endpoint` | `string` | `"http://localhost:1234/v1"` | OpenAI-compatible endpoint. |
-| `model` | `string` | `"qwen3.5-32b"` | Model for dreaming tasks. |
-| `api_key` | `string` | `""` | API key if needed. |
-| `tasks` | `array` | `["decay", "consolidate"]` | Tasks to run: `"decay"`, `"consolidate"`, `"mine"`, `"verify"`, `"git"`, `"map"`. |
+| Command | Description |
+|---------|-------------|
+| `/ctx-status` | Show current context usage, tag counts, pending queue, nudge state, and history compression info. |
+| `/ctx-flush` | Force-execute all pending operations and heuristic cleanup immediately. |
+| `/ctx-recomp` | Rebuild compartments and facts from raw session history. Resumable across restarts. |
+| `/ctx-dream` | Enqueue the current project for a dream run and process immediately. |
+| `/ctx-aug` | Run sidekick augmentation on the provided prompt. |
 
 ---
 
@@ -150,13 +215,32 @@ Background memory maintenance on a schedule (typically overnight). Requires a lo
 ```jsonc
 {
   "enabled": true,
-  "cache_ttl": "5m",
-  "protected_tags": 5,
-  "execute_threshold_percentage": 65,
+  "cache_ttl": {
+    "default": "5m",
+    "anthropic/claude-opus-4-6": "58m"
+  },
+  "execute_threshold_percentage": {
+    "default": 65,
+    "anthropic/claude-opus-4-6": 50
+  },
+  "protected_tags": 10,
+  "auto_drop_tool_age": 50,
+  "history_budget_percentage": 0.15,
 
   "historian": {
-    "model": "anthropic/claude-haiku-4",
-    "fallback_models": ["anthropic/claude-3-5-haiku"]
+    "model": "github-copilot/gpt-5.4",
+    "fallback_models": ["anthropic/claude-sonnet-4-6"]
+  },
+
+  "dreamer": {
+    "model": "github-copilot/gpt-5.4",
+    "fallback_models": ["anthropic/claude-sonnet-4-6"]
+  },
+
+  "dreaming": {
+    "enabled": true,
+    "schedule": "02:00-06:00",
+    "tasks": ["consolidate", "verify", "archive-stale", "improve", "maintain-docs"]
   },
 
   "embedding": {
@@ -169,11 +253,11 @@ Background memory maintenance on a schedule (typically overnight). Requires a lo
     "auto_promote": true
   },
 
-  "dreaming": {
-    "enabled": false,
-    "schedule": "02:00-06:00",
-    "model": "qwen3.5-32b",
-    "tasks": ["decay", "consolidate"]
+  "sidekick": {
+    "enabled": true,
+    "endpoint": "https://api.cerebras.ai/v1",
+    "model": "qwen-3-235b-a22b-instruct-2507",
+    "api_key": "..."
   }
 }
 ```
