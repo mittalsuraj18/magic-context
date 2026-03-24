@@ -3,6 +3,7 @@ import {
     DEFAULT_EXECUTE_THRESHOLD_PERCENTAGE,
     DEFAULT_NUDGE_INTERVAL_TOKENS,
 } from "../../config/schema/magic-context";
+import { getCompartments, getSessionFacts } from "../../features/magic-context/compartment-storage";
 import { parseCacheTtl } from "../../features/magic-context/scheduler";
 import { getPendingOps } from "../../features/magic-context/storage";
 import { getOrCreateSessionMeta } from "../../features/magic-context/storage-meta";
@@ -20,6 +21,7 @@ import {
     getRollingNudgeBand,
     getRollingNudgeIntervalTokens,
 } from "./nudge-bands";
+import { estimateTokens } from "./read-session-formatting";
 
 export function executeStatus(
     db: Database,
@@ -30,6 +32,7 @@ export function executeStatus(
         | number
         | { default: number; [modelKey: string]: number } = DEFAULT_EXECUTE_THRESHOLD_PERCENTAGE,
     liveModelKey?: string,
+    historyBudgetPercentage?: number,
 ): string {
     const executeThresholdPercentage = resolveExecuteThreshold(
         executeThresholdPercentageConfig,
@@ -106,11 +109,12 @@ export function executeStatus(
             `**Subagent session:** ${meta.isSubagent}`,
         ];
 
+        const contextLimit =
+            meta.lastContextPercentage > 0
+                ? Math.round(meta.lastInputTokens / (meta.lastContextPercentage / 100))
+                : 0;
+
         if (meta.lastContextPercentage > 0 || meta.lastInputTokens > 0) {
-            const contextLimit =
-                meta.lastContextPercentage > 0
-                    ? Math.round(meta.lastInputTokens / (meta.lastContextPercentage / 100))
-                    : 0;
             lines.push(
                 "",
                 "### Context Usage",
@@ -122,6 +126,43 @@ export function executeStatus(
                 `- Historian also fires on: 2+ commit clusters with sufficient tokens, or tail > ${3}x compartment budget`,
             );
         }
+
+        // History Compression section — show current block size vs budget
+        const compartments = getCompartments(db, sessionId);
+        const facts = getSessionFacts(db, sessionId);
+        let historyBlockTokens = 0;
+        for (const c of compartments) {
+            historyBlockTokens += estimateTokens(
+                `<compartment start="${c.startMessage}" end="${c.endMessage}" title="${c.title}">\n${c.content}\n</compartment>\n`,
+            );
+        }
+        for (const f of facts) {
+            historyBlockTokens += estimateTokens(`* ${f.content}\n`);
+        }
+
+        const budgetTokens =
+            historyBudgetPercentage && contextLimit > 0
+                ? Math.floor(
+                      contextLimit * (executeThresholdPercentage / 100) * historyBudgetPercentage,
+                  )
+                : null;
+        const budgetUsage = budgetTokens
+            ? ((historyBlockTokens / budgetTokens) * 100).toFixed(0)
+            : null;
+
+        lines.push(
+            "",
+            "### History Compression",
+            `- Compartments: ${compartments.length}`,
+            `- Facts: ${facts.length}`,
+            `- History block: ~${historyBlockTokens.toLocaleString()} tokens`,
+            ...(budgetTokens
+                ? [
+                      `- Compression budget: ~${budgetTokens.toLocaleString()} tokens (${budgetUsage}% used)`,
+                      `- Compressor fires: when history block exceeds budget after historian run`,
+                  ]
+                : [`- Compression budget: not configured (history_budget_percentage not set)`]),
+        );
 
         if (pendingOps.length > 0) {
             lines.push("", "### Queued Operations");

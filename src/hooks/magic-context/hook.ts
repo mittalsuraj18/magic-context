@@ -188,6 +188,7 @@ export function createMagicContextHook(deps: MagicContextDeps) {
         protectedTags: deps.config.protected_tags,
         nudgeIntervalTokens: deps.config.nudge_interval_tokens ?? DEFAULT_NUDGE_INTERVAL_TOKENS,
         executeThresholdPercentage: deps.config.execute_threshold_percentage ?? 65,
+        historyBudgetPercentage: deps.config.history_budget_percentage,
         getLiveModelKey: (sessionId) => {
             const model = liveModelBySession.get(sessionId);
             return model ? `${model.providerID}/${model.modelID}` : undefined;

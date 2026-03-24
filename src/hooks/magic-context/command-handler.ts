@@ -102,6 +102,7 @@ export function createMagicContextCommandHandler(deps: {
     protectedTags: number;
     nudgeIntervalTokens?: number;
     executeThresholdPercentage?: number | { default: number; [modelKey: string]: number };
+    historyBudgetPercentage?: number;
     getLiveModelKey?: (sessionId: string) => string | undefined;
     onFlush?: (sessionId: string) => void;
     executeRecomp?: (sessionId: string) => Promise<string>;
@@ -159,6 +160,7 @@ export function createMagicContextCommandHandler(deps: {
                     deps.nudgeIntervalTokens,
                     deps.executeThresholdPercentage,
                     liveModelKey,
+                    deps.historyBudgetPercentage,
                 );
                 result += result ? `\n\n${statusOutput}` : statusOutput;
             }
