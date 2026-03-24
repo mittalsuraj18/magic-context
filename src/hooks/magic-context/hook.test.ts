@@ -12,6 +12,9 @@ import { createMagicContextHook, type MagicContextDeps } from "./hook";
 type PromptMocks = {
     prompt?: ReturnType<typeof mock>;
     promptAsync: ReturnType<typeof mock>;
+    createSession: ReturnType<typeof mock>;
+    listMessages: ReturnType<typeof mock>;
+    deleteSession: ReturnType<typeof mock>;
     showToast: ReturnType<typeof mock>;
 };
 
@@ -38,6 +41,16 @@ function createPromptMocks(withSyncPrompt = true): PromptMocks {
     return {
         prompt: withSyncPrompt ? mock(() => undefined) : undefined,
         promptAsync: mock(async () => undefined),
+        createSession: mock(async () => ({ data: { id: "dream-child" } })),
+        listMessages: mock(async () => ({
+            data: [
+                {
+                    info: { role: "assistant", time: { created: Date.now() } },
+                    parts: [{ type: "text", text: "dream complete" }],
+                },
+            ],
+        })),
+        deleteSession: mock(async () => ({ data: undefined })),
         showToast: mock(async () => undefined),
     };
 }
@@ -65,8 +78,11 @@ function createMockDeps(promptMocks: PromptMocks = createPromptMocks()): MagicCo
     return {
         client: {
             session: {
+                create: promptMocks.createSession,
                 ...(promptMocks.prompt ? { prompt: promptMocks.prompt } : {}),
                 promptAsync: promptMocks.promptAsync,
+                messages: promptMocks.listMessages,
+                delete: promptMocks.deleteSession,
             },
             tui: {
                 showToast: promptMocks.showToast,
@@ -255,6 +271,73 @@ describe("magic-context hook", () => {
                             text: expect.stringContaining("No pending operations to flush."),
                             ignored: true,
                         },
+                    ],
+                }),
+            }),
+        );
+    });
+
+    it("sends dream notifications for ctx-dream and throws the sentinel", async () => {
+        process.env.XDG_DATA_HOME = makeTempDir("hook-dream-notification-");
+        const promptMocks = createPromptMocks();
+        const deps = createMockDeps(promptMocks);
+        deps.config = {
+            ...deps.config,
+            dreaming: {
+                enabled: true,
+                schedule: "02:00-06:00",
+                max_runtime_minutes: 60,
+                tasks: ["consolidate"],
+                task_timeout_minutes: 10,
+            },
+        };
+        const hook = requireHook(createMagicContextHook(deps));
+
+        await expect(
+            hook["command.execute.before"]!(
+                { command: "ctx-dream", sessionID: "ses-dream", arguments: "" },
+                { parts: [{ type: "text", text: "" }] },
+            ),
+        ).rejects.toThrow("__CONTEXT_MANAGEMENT_CTX-DREAM_HANDLED__");
+
+        expect(promptMocks.prompt).toHaveBeenCalledTimes(3);
+        expect(promptMocks.createSession).toHaveBeenCalledTimes(1);
+        expect(promptMocks.deleteSession).toHaveBeenCalledTimes(1);
+        const firstCallArg = promptMocks.prompt?.mock.calls[0]?.[0] as Record<string, unknown>;
+        const secondCallArg = promptMocks.prompt?.mock.calls[1]?.[0] as Record<string, unknown>;
+        const thirdCallArg = promptMocks.prompt?.mock.calls[2]?.[0] as Record<string, unknown>;
+        expect(firstCallArg).toEqual(
+            expect.objectContaining({
+                path: { id: "ses-dream" },
+                body: expect.objectContaining({
+                    parts: [
+                        expect.objectContaining({
+                            text: "Starting dream run...",
+                        }),
+                    ],
+                }),
+            }),
+        );
+        expect(secondCallArg).toEqual(
+            expect.objectContaining({
+                path: { id: "dream-child" },
+                body: expect.objectContaining({
+                    parts: [
+                        expect.objectContaining({
+                            text: expect.stringContaining("Goal: load all active memories"),
+                        }),
+                    ],
+                }),
+            }),
+        );
+        expect(thirdCallArg).toEqual(
+            expect.objectContaining({
+                path: { id: "ses-dream" },
+                body: expect.objectContaining({
+                    parts: [
+                        expect.objectContaining({
+                            text: expect.stringContaining("## /ctx-dream"),
+                        }),
                     ],
                 }),
             }),

@@ -2,6 +2,7 @@ import {
     DEFAULT_COMPARTMENT_TOKEN_BUDGET,
     DEFAULT_HISTORIAN_TIMEOUT_MS,
     DEFAULT_NUDGE_INTERVAL_TOKENS,
+    type DreamingConfig,
 } from "../../config/schema/magic-context";
 import type { createCompactionHandler } from "../../features/magic-context/compaction";
 import { resolveProjectIdentity } from "../../features/magic-context/memory/project-identity";
@@ -68,6 +69,7 @@ export interface MagicContextDeps {
             timeout_ms: number;
             system_prompt?: string;
         };
+        dreaming?: DreamingConfig;
     };
 }
 
@@ -221,6 +223,14 @@ export function createMagicContextHook(deps: MagicContextDeps) {
                   projectPath: resolveProjectIdentity(deps.directory),
                   client: deps.client,
                   pendingResults: pendingSidekickResults,
+              }
+            : undefined,
+        dreaming: deps.config.dreaming
+            ? {
+                  config: deps.config.dreaming,
+                  projectPath: resolveProjectIdentity(deps.directory),
+                  client: deps.client,
+                  directory: deps.directory,
               }
             : undefined,
     });

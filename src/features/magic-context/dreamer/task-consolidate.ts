@@ -1,3 +1,4 @@
+/** @deprecated Legacy deterministic dream task retained for fallback/debugging only. */
 import type { Database } from "bun:sqlite";
 import { cosineSimilarity, embedText, getEmbeddingModelId } from "../memory/embedding";
 import { computeNormalizedHash } from "../memory/normalize-hash";

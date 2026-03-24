@@ -2,6 +2,7 @@
 
 import { Database } from "bun:sqlite";
 import { afterAll, afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import type { PluginContext } from "../../../plugin/types";
 
 function cosineSimilarity(a: Float32Array, b: Float32Array): number {
     if (a.length !== b.length) {
@@ -50,6 +51,49 @@ const { runDecayTask } = await import("./task-decay");
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 let db: Database | null = null;
+
+function createDreamClient(
+    args: {
+        createdSessionIds?: string[];
+        promptOutputsBySession?: Map<string, string>;
+        deletedSessionIds?: string[];
+    } = {},
+): PluginContext["client"] {
+    let nextSessionId = 0;
+    return {
+        session: {
+            create: mock(async () => {
+                nextSessionId += 1;
+                const id = `dream-${nextSessionId}`;
+                args.createdSessionIds?.push(id);
+                return { data: { id } };
+            }),
+            prompt: mock(async () => undefined),
+            messages: mock(async (input: { path: { id: string } }) => ({
+                data: [
+                    {
+                        info: {
+                            role: "assistant",
+                            time: { created: Date.now() },
+                        },
+                        parts: [
+                            {
+                                type: "text",
+                                text:
+                                    args.promptOutputsBySession?.get(input.path.id) ??
+                                    `completed ${input.path.id}`,
+                            },
+                        ],
+                    },
+                ],
+            })),
+            delete: mock(async (input: { path: { id: string } }) => {
+                args.deletedSessionIds?.push(input.path.id);
+                return { data: undefined };
+            }),
+        },
+    } as unknown as PluginContext["client"];
+}
 
 function createTestDb(): Database {
     const database = Database.open(":memory:");
@@ -324,44 +368,30 @@ describe("dreamer", () => {
     });
 
     describe("dream runner", () => {
-        it("orchestrates tasks in order", async () => {
+        it("orchestrates llm dream tasks in order and releases the lease", async () => {
             db = createTestDb();
-            const expiring = insertMemory(db, {
-                projectPath: "/repo/project",
-                category: "KNOWN_ISSUES",
-                content: "Expires during dream",
-                expiresAt: 1,
-            });
-            const duplicateA = insertMemory(db, {
-                projectPath: "/repo/project",
-                category: "CONSTRAINTS",
-                content: "Use bun for scripts",
-            });
-            const duplicateB = insertMemory(db, {
-                projectPath: "/repo/project",
-                category: "CONSTRAINTS",
-                content: "Use bun for all scripts in this repo",
-            });
-            saveUnitEmbedding(duplicateA.id, [1, 0]);
-            saveUnitEmbedding(duplicateB.id, [0.96, 0.28]);
-            embeddedContent.set(duplicateB.content, new Float32Array([0.96, 0.28]));
+            const createdSessionIds: string[] = [];
+            const deletedSessionIds: string[] = [];
+            const client = createDreamClient({ createdSessionIds, deletedSessionIds });
 
             const result = await runDream({
                 db,
+                client,
                 projectPath: "/repo/project",
-                tasks: ["decay", "consolidate"],
-                promotionThreshold: 3,
+                tasks: ["consolidate", "verify"],
+                taskTimeoutMinutes: 5,
                 maxRuntimeMinutes: 10,
+                parentSessionId: "parent-1",
+                sessionDirectory: "/repo/project",
             });
 
-            expect(result.tasks.map((task) => task.name)).toEqual(["decay", "consolidate"]);
+            expect(result.tasks.map((task) => task.name)).toEqual(["consolidate", "verify"]);
             expect(result.tasks.every((task) => task.durationMs >= 0)).toBe(true);
-            expect(getMemoryById(db, expiring.id)?.status).toBe("archived");
-            expect(getMemoryById(db, duplicateA.id)?.status).toBe("archived");
-            expect(getMemoryById(db, duplicateA.id)?.supersededByMemoryId).toBe(duplicateB.id);
+            expect(result.tasks.every((task) => typeof task.result === "string")).toBe(true);
             expect(getDreamState(db, "last_dream_at")).not.toBeNull();
             expect(isLeaseActive(db)).toBe(false);
-            expect(loadAllEmbeddings(db, "/repo/project").has(duplicateB.id)).toBe(true);
+            expect(createdSessionIds).toEqual(["dream-1", "dream-2"]);
+            expect(deletedSessionIds).toEqual(["dream-1", "dream-2"]);
         });
     });
 });

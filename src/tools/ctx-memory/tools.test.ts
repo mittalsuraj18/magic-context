@@ -79,7 +79,8 @@ function createTestDb(): Database {
     return db;
 }
 
-const toolContext = (sessionID = "ses-memory") => ({ sessionID }) as never;
+const toolContext = (sessionID = "ses-memory", agent = "general") =>
+    ({ sessionID, agent }) as never;
 
 afterEach(() => {
     queryEmbedding = null;
@@ -218,6 +219,109 @@ describe("createCtxMemoryTools", () => {
 
             expect(result).toContain("Error");
             expect(result).toContain("was not found");
+        });
+    });
+
+    describe("#given list action", () => {
+        it("returns a formatted memory table", async () => {
+            insertMemory(db, {
+                projectPath: "/repo/project",
+                category: "USER_DIRECTIVES",
+                content: "Always run bun test before shipping.",
+            });
+            insertMemory(db, {
+                projectPath: "/repo/project",
+                category: "CONSTRAINTS",
+                content: "Do not use npm in this repo.",
+            });
+
+            const result = await tools.ctx_memory.execute(
+                { action: "list", limit: 10 },
+                toolContext(),
+            );
+
+            expect(result).toContain("Found 2 active memories");
+            expect(result).toContain("CATEGORY");
+            expect(result).toContain("Always run bun test before shipping.");
+            expect(result).toContain("Do not use npm in this repo.");
+        });
+    });
+
+    describe("#given update action", () => {
+        it("updates memory content and invalidates stale embeddings", async () => {
+            const memory = insertMemory(db, {
+                projectPath: "/repo/project",
+                category: "CONFIG_DEFAULTS",
+                content: "cache_ttl=5m",
+            });
+            saveEmbedding(db, memory.id, new Float32Array([1, 0]), "mock:model");
+
+            const result = await tools.ctx_memory.execute(
+                {
+                    action: "update",
+                    id: memory.id,
+                    content: "cache_ttl=10m",
+                },
+                toolContext(),
+            );
+
+            expect(result).toContain(`Updated memory [ID: ${memory.id}]`);
+            expect(getMemoryById(db, memory.id)?.content).toBe("cache_ttl=10m");
+        });
+    });
+
+    describe("#given merge action", () => {
+        it("creates a canonical merged memory and archives source memories", async () => {
+            const first = insertMemory(db, {
+                projectPath: "/repo/project",
+                category: "CONSTRAINTS",
+                content: "Use bun for scripts",
+            });
+            const second = insertMemory(db, {
+                projectPath: "/repo/project",
+                category: "CONSTRAINTS",
+                content: "Use bun for all scripts in this repo",
+            });
+
+            const result = await tools.ctx_memory.execute(
+                {
+                    action: "merge",
+                    ids: [first.id, second.id],
+                    content: "Use bun for all scripts in this repository.",
+                },
+                toolContext("ses-dreamer"),
+            );
+
+            expect(result).toContain("Merged memories");
+            const activeMemories = getMemoriesByProject(db, "/repo/project");
+            expect(activeMemories).toHaveLength(1);
+            expect(activeMemories[0]?.content).toBe("Use bun for all scripts in this repository.");
+            expect(getMemoryById(db, first.id)?.status).toBe("archived");
+            expect(getMemoryById(db, second.id)?.status).toBe("archived");
+        });
+    });
+
+    describe("#given archive action", () => {
+        it("archives the memory and stores the archive reason in metadata", async () => {
+            const memory = insertMemory(db, {
+                projectPath: "/repo/project",
+                category: "KNOWN_ISSUES",
+                content: "Old issue entry",
+            });
+
+            const result = await tools.ctx_memory.execute(
+                {
+                    action: "archive",
+                    id: memory.id,
+                    reason: "Removed subsystem no longer exists",
+                },
+                toolContext(),
+            );
+
+            expect(result).toContain("Archived memory");
+            expect(getMemoryById(db, memory.id)?.metadataJson).toContain(
+                "Removed subsystem no longer exists",
+            );
         });
     });
 
@@ -442,6 +546,44 @@ describe("createCtxMemoryTools", () => {
                 "Cross-session memory is disabled for this project.",
                 "Cross-session memory is disabled for this project.",
             ]);
+        });
+    });
+
+    describe("#given restricted actions", () => {
+        it("rejects dreamer-only actions for primary-agent tool instances", async () => {
+            const primaryTools = createCtxMemoryTools({
+                db,
+                projectPath: "/repo/project",
+                memoryEnabled: true,
+                embeddingEnabled: false,
+                allowedActions: ["write", "delete", "search"],
+            });
+
+            const result = await primaryTools.ctx_memory.execute({ action: "list" }, toolContext());
+
+            expect(result).toContain("not allowed");
+        });
+
+        it("allows dreamer sessions to use dreamer-only actions on the shared tool", async () => {
+            insertMemory(db, {
+                projectPath: "/repo/project",
+                category: "USER_DIRECTIVES",
+                content: "Keep replies concise.",
+            });
+            const primaryTools = createCtxMemoryTools({
+                db,
+                projectPath: "/repo/project",
+                memoryEnabled: true,
+                embeddingEnabled: false,
+                allowedActions: ["write", "delete", "search"],
+            });
+
+            const result = await primaryTools.ctx_memory.execute(
+                { action: "list" },
+                toolContext("ses-dream", "dreamer"),
+            );
+
+            expect(result).toContain("Found 1 active memory");
         });
     });
 });

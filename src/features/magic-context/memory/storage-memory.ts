@@ -73,6 +73,7 @@ const getMemoryByIdStatements = new WeakMap<Database, PreparedStatement>();
 const updateMemorySeenCountStatements = new WeakMap<Database, PreparedStatement>();
 const updateMemoryRetrievalCountStatements = new WeakMap<Database, PreparedStatement>();
 const updateMemoryStatusStatements = new WeakMap<Database, PreparedStatement>();
+const updateArchivedMemoryStatements = new WeakMap<Database, PreparedStatement>();
 const updateMemoryVerificationStatements = new WeakMap<Database, PreparedStatement>();
 const updateMemoryContentStatements = new WeakMap<Database, PreparedStatement>();
 const supersededMemoryStatements = new WeakMap<Database, PreparedStatement>();
@@ -250,6 +251,17 @@ function getUpdateMemoryStatusStatement(db: Database): PreparedStatement {
     return stmt;
 }
 
+function getUpdateArchivedMemoryStatement(db: Database): PreparedStatement {
+    let stmt = updateArchivedMemoryStatements.get(db);
+    if (!stmt) {
+        stmt = db.prepare(
+            "UPDATE memories SET status = 'archived', metadata_json = ?, updated_at = ? WHERE id = ?",
+        );
+        updateArchivedMemoryStatements.set(db, stmt);
+    }
+    return stmt;
+}
+
 function getUpdateMemoryVerificationStatement(db: Database): PreparedStatement {
     let stmt = updateMemoryVerificationStatements.get(db);
     if (!stmt) {
@@ -415,6 +427,23 @@ export function updateMemoryStatus(db: Database, id: number, status: MemoryStatu
     getUpdateMemoryStatusStatement(db).run(status, Date.now(), id);
 }
 
+function mergeMetadataJson(existing: string | null, patch: Record<string, string>): string | null {
+    let base: Record<string, unknown> = {};
+
+    if (existing) {
+        try {
+            const parsed = JSON.parse(existing);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+                base = parsed as Record<string, unknown>;
+            }
+        } catch {
+            base = {};
+        }
+    }
+
+    return JSON.stringify({ ...base, ...patch });
+}
+
 export function updateMemoryVerification(
     db: Database,
     id: number,
@@ -471,8 +500,23 @@ export function mergeMemoryStats(
     );
 }
 
-export function archiveMemory(db: Database, id: number): void {
-    updateMemoryStatus(db, id, "archived");
+export function archiveMemory(db: Database, id: number, reason?: string): void {
+    const trimmedReason = reason?.trim();
+    if (!trimmedReason) {
+        updateMemoryStatus(db, id, "archived");
+        return;
+    }
+
+    const memory = getMemoryById(db, id);
+    if (!memory) {
+        return;
+    }
+
+    getUpdateArchivedMemoryStatement(db).run(
+        mergeMetadataJson(memory.metadataJson, { archive_reason: trimmedReason }),
+        Date.now(),
+        id,
+    );
 }
 
 export function deleteMemory(db: Database, id: number): void {

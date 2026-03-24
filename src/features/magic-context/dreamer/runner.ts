@@ -1,10 +1,14 @@
 import type { Database } from "bun:sqlite";
+import { DREAMER_AGENT } from "../../../agents/dreamer";
+import type { DreamingTask } from "../../../config/schema/magic-context";
+import type { PluginContext } from "../../../plugin/types";
+import * as shared from "../../../shared";
 import { getErrorMessage } from "../../../shared/error-message";
 import { log } from "../../../shared/logger";
+import { extractLatestAssistantText } from "../../../tools/look-at/assistant-message-extractor";
 import { acquireLease, getLeaseHolder, releaseLease, renewLease } from "./lease";
-import { setDreamState } from "./storage-dream-state";
-import { runConsolidateTask } from "./task-consolidate";
-import { runDecayTask } from "./task-decay";
+import { buildDreamTaskPrompt, DREAMER_SYSTEM_PROMPT } from "./task-prompts";
+import { getDreamState, setDreamState } from "./storage-dream-state";
 
 export interface DreamRunResult {
     startedAt: number;
@@ -20,10 +24,13 @@ export interface DreamRunResult {
 
 export async function runDream(args: {
     db: Database;
+    client: PluginContext["client"];
     projectPath: string;
-    tasks: string[];
-    promotionThreshold: number;
+    tasks: DreamingTask[];
+    taskTimeoutMinutes: number;
     maxRuntimeMinutes: number;
+    parentSessionId?: string;
+    sessionDirectory?: string;
 }): Promise<DreamRunResult> {
     const holderId = crypto.randomUUID();
     const startedAt = Date.now();
@@ -46,6 +53,7 @@ export async function runDream(args: {
     }
 
     const deadline = startedAt + args.maxRuntimeMinutes * 60 * 1000;
+    const lastDreamAt = getDreamState(args.db, "last_dream_at");
 
     try {
         for (const taskName of args.tasks) {
@@ -54,19 +62,60 @@ export async function runDream(args: {
             }
 
             const taskStartedAt = Date.now();
+            let agentSessionId: string | null = null;
 
             try {
-                let taskResult: unknown;
-                if (taskName === "decay") {
-                    taskResult = await runDecayTask(
-                        args.db,
-                        { promotionThreshold: args.promotionThreshold },
-                        args.projectPath,
-                    );
-                } else if (taskName === "consolidate") {
-                    taskResult = await runConsolidateTask(args.db, args.projectPath);
-                } else {
-                    throw new Error(`Dream task \"${taskName}\" is not implemented yet`);
+                const taskPrompt = [
+                    DREAMER_SYSTEM_PROMPT,
+                    "",
+                    buildDreamTaskPrompt(taskName, {
+                        projectPath: args.projectPath,
+                        lastDreamAt,
+                    }),
+                ].join("\n");
+
+                const createResponse = await args.client.session.create({
+                    body: {
+                        ...(args.parentSessionId ? { parentID: args.parentSessionId } : {}),
+                        title: `magic-context-dream-${taskName}`,
+                    },
+                    query: { directory: args.sessionDirectory ?? args.projectPath },
+                });
+
+                const createdSession = shared.normalizeSDKResponse(
+                    createResponse,
+                    null as { id?: string } | null,
+                    { preferResponseOnMissingData: true },
+                );
+                agentSessionId = typeof createdSession?.id === "string" ? createdSession.id : null;
+                if (!agentSessionId) {
+                    throw new Error("Dreamer could not create its child session.");
+                }
+
+                await shared.promptSyncWithModelSuggestionRetry(
+                    args.client,
+                    {
+                        path: { id: agentSessionId },
+                        query: { directory: args.sessionDirectory ?? args.projectPath },
+                        body: {
+                            agent: DREAMER_AGENT,
+                            system: DREAMER_SYSTEM_PROMPT,
+                            parts: [{ type: "text", text: taskPrompt }],
+                        },
+                    },
+                    { timeoutMs: args.taskTimeoutMinutes * 60 * 1000 },
+                );
+
+                const messagesResponse = await args.client.session.messages({
+                    path: { id: agentSessionId },
+                    query: { directory: args.sessionDirectory ?? args.projectPath },
+                });
+                const messages = shared.normalizeSDKResponse(messagesResponse, [] as unknown[], {
+                    preferResponseOnMissingData: true,
+                });
+                const taskResult = extractLatestAssistantText(messages);
+                if (!taskResult) {
+                    throw new Error("Dreamer returned no assistant output.");
                 }
 
                 result.tasks.push({
@@ -81,6 +130,17 @@ export async function runDream(args: {
                     result: null,
                     error: getErrorMessage(error),
                 });
+            } finally {
+                if (agentSessionId) {
+                    await args.client.session
+                        .delete({
+                            path: { id: agentSessionId },
+                            query: { directory: args.sessionDirectory ?? args.projectPath },
+                        })
+                        .catch((error: unknown) => {
+                            log("[dreamer] failed to delete child session:", error);
+                        });
+                }
             }
 
             if (!renewLease(args.db, holderId)) {

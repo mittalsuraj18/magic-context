@@ -353,6 +353,64 @@ describe("createMagicContextCommandHandler", () => {
         });
     });
 
+    describe("ctx-dream", () => {
+        it("starts a dream run, sends summary, and throws the sentinel", async () => {
+            const sendNotification = mock(async () => {});
+            const executeDream = mock(async () => ({
+                startedAt: 1,
+                finishedAt: 2,
+                holderId: "dream-holder",
+                tasks: [
+                    {
+                        name: "consolidate",
+                        durationMs: 500,
+                        result: "merged duplicates",
+                    },
+                ],
+            }));
+            const handler = createMagicContextCommandHandler({
+                db,
+                protectedTags: 3,
+                sendNotification,
+                dreaming: {
+                    config: {
+                        enabled: true,
+                        schedule: "02:00-06:00",
+                        max_runtime_minutes: 60,
+                        tasks: ["consolidate"],
+                        task_timeout_minutes: 10,
+                    },
+                    projectPath: "/repo/project",
+                    client: {},
+                    directory: "/repo/project",
+                    executeDream,
+                },
+            });
+
+            await expect(
+                handler["command.execute.before"](
+                    { command: "ctx-dream", sessionID: "ses-dream", arguments: "" },
+                    makeOutput(""),
+                    {},
+                ),
+            ).rejects.toThrow("__CONTEXT_MANAGEMENT_CTX-DREAM_HANDLED__");
+
+            expect(executeDream).toHaveBeenCalledWith("ses-dream");
+            expect(sendNotification).toHaveBeenNthCalledWith(
+                1,
+                "ses-dream",
+                "Starting dream run...",
+                {},
+            );
+            expect(sendNotification).toHaveBeenNthCalledWith(
+                2,
+                "ses-dream",
+                expect.stringContaining("### Tasks"),
+                {},
+            );
+        });
+    });
+
     it("handles flush and status as independent commands", async () => {
         insertTag(db, "ses-both", 1, 200);
         insertPendingOp(db, "ses-both", 1);

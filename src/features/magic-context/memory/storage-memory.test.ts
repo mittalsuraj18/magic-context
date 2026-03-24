@@ -16,6 +16,7 @@ import {
     loadAllEmbeddings,
     saveEmbedding,
     searchMemoriesFTS,
+    updateMemoryContent,
     updateMemoryRetrievalCount,
     updateMemorySeenCount,
     updateMemoryStatus,
@@ -194,6 +195,43 @@ describe("storage-memory", () => {
             expect(updated?.verificationStatus).toBe("verified");
             expect(updated?.verifiedAt).not.toBeNull();
             expect(updated?.status).toBe("archived");
+        });
+
+        it("#when archiving with a reason #then metadata stores the archive reason", () => {
+            db = makeMemoryDatabase();
+            const memory = insertMemory(db, {
+                projectPath: "/repo/project",
+                category: "KNOWN_ISSUES",
+                content: "Legacy issue",
+            });
+
+            archiveMemory(db, memory.id, "Superseded by new pipeline");
+
+            const updated = getMemoryById(db, memory.id);
+            expect(updated?.status).toBe("archived");
+            expect(updated?.metadataJson).toContain("Superseded by new pipeline");
+        });
+
+        it("#when updating memory content #then normalized hash changes and embeddings are deleted", () => {
+            db = makeMemoryDatabase();
+            const memory = insertMemory(db, {
+                projectPath: "/repo/project",
+                category: "CONFIG_DEFAULTS",
+                content: "cache_ttl=5m",
+            });
+            saveEmbedding(db, memory.id, new Float32Array([0.1, 0.2]), "local:model-a");
+
+            updateMemoryContent(
+                db,
+                memory.id,
+                "cache_ttl=10m",
+                computeNormalizedHash("cache_ttl=10m"),
+            );
+
+            const updated = getMemoryById(db, memory.id);
+            expect(updated?.content).toBe("cache_ttl=10m");
+            expect(updated?.normalizedHash).toBe(computeNormalizedHash("cache_ttl=10m"));
+            expect(loadAllEmbeddings(db, "/repo/project")).toEqual(new Map());
         });
     });
 

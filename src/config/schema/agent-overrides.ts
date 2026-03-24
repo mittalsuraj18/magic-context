@@ -1,6 +1,8 @@
 import type { AgentConfig } from "@opencode-ai/sdk";
 import { z } from "zod";
 
+export const MAGIC_CONTEXT_AGENT_OVERRIDE_KEYS = ["historian", "dreamer"] as const;
+
 const PermissionValueSchema = z.enum(["ask", "allow", "deny"]);
 
 const PermissionSchema = z

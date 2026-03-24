@@ -79,6 +79,7 @@ export function createToolRegistry(args: {
                       projectPath,
                       memoryEnabled: true,
                       embeddingEnabled: embeddingConfig.provider !== "off",
+                      allowedActions: ["write", "delete", "search"],
                   }),
               }
             : {}),

@@ -1,10 +1,15 @@
 import type { Plugin } from "@opencode-ai/plugin";
+import { HISTORIAN_AGENT } from "./agents/historian";
 import { loadPluginConfig } from "./config";
+import { DREAMER_AGENT } from "./agents/dreamer";
+import { getMagicContextBuiltinCommands } from "./features/builtin-commands/commands";
+import { DREAMER_SYSTEM_PROMPT } from "./features/magic-context/dreamer/task-prompts";
 import { COMPARTMENT_AGENT_SYSTEM_PROMPT } from "./hooks/magic-context/compartment-prompt";
 import { createEventHandler } from "./plugin/event";
 import { createSessionHooks } from "./plugin/hooks/create-session-hooks";
 import { createMessagesTransformHandler } from "./plugin/messages-transform";
 import { createToolRegistry } from "./plugin/tool-registry";
+import { getAgentFallbackModels } from "./shared/model-requirements";
 import { isOpenCodeAutoCompactionEnabled } from "./shared/opencode-compaction-detector";
 
 const plugin: Plugin = async (ctx) => {
@@ -47,43 +52,39 @@ const plugin: Plugin = async (ctx) => {
             await hooks.magicContext?.["experimental.text.complete"]?.(input, output);
         },
         config: async (config) => {
+            const buildHiddenAgentConfig = (
+                agentId: string,
+                prompt: string,
+                overrides?: Record<string, unknown>,
+            ) => ({
+                prompt,
+                ...(getAgentFallbackModels(agentId)
+                    ? { fallback_models: getAgentFallbackModels(agentId) }
+                    : {}),
+                ...(overrides ?? {}),
+                mode: "subagent" as const,
+                hidden: true,
+            });
+
             const commandConfig = {
                 ...(config.command ?? {}),
+                ...getMagicContextBuiltinCommands(),
                 ...(pluginConfig.command ?? {}),
-                "ctx-status": {
-                    template: "ctx-status",
-                    description:
-                        "Show magic context status, pending queue, cache TTL, and debug info",
-                },
-                "ctx-recomp": {
-                    template: "ctx-recomp",
-                    description:
-                        "Rebuild compartments and facts from raw history without publishing partial results",
-                },
-                "ctx-flush": {
-                    template: "ctx-flush",
-                    description: "Force-process all pending magic context operations immediately",
-                },
-                "ctx-aug": {
-                    template: "ctx-aug",
-                    description:
-                        "Augment your prompt with project memory context via sidekick agent",
-                },
             };
 
             config.command = commandConfig;
             config.agent = {
                 ...(config.agent ?? {}),
-                ...(pluginConfig.historian
-                    ? {
-                          historian: {
-                              prompt: COMPARTMENT_AGENT_SYSTEM_PROMPT,
-                              ...pluginConfig.historian,
-                              mode: "subagent",
-                              hidden: true,
-                          },
-                      }
-                    : {}),
+                [DREAMER_AGENT]: buildHiddenAgentConfig(
+                    DREAMER_AGENT,
+                    DREAMER_SYSTEM_PROMPT,
+                    pluginConfig.dreamer,
+                ),
+                [HISTORIAN_AGENT]: buildHiddenAgentConfig(
+                    HISTORIAN_AGENT,
+                    COMPARTMENT_AGENT_SYSTEM_PROMPT,
+                    pluginConfig.historian,
+                ),
             };
         },
     };

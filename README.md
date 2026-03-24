@@ -158,6 +158,10 @@ Forces all queued operations to apply immediately, bypassing cache TTL. Reports 
 
 Rebuilds compartments, facts, and notes from raw session history. Use when stored historian state seems stale or structurally wrong.
 
+### `/ctx-dream`
+
+Runs the hidden dreamer maintenance pass on demand. Dreamer uses child OpenCode sessions to consolidate, verify, archive, and rewrite persistent memories, and can also keep architecture docs in sync.
+
 ---
 
 ## Storage
@@ -207,9 +211,11 @@ bun run format         # Format
 ```sh
 bun scripts/tail-view.ts             # Tail structured log output
 bun scripts/context-dump.ts          # Dump context DB for a session
-bun scripts/dream.ts                 # Trigger dreaming manually
+bun scripts/dream.ts                 # Print /ctx-dream guidance (needs live OpenCode)
 bun scripts/backfill-embeddings.ts   # Backfill missing embeddings
 ```
+
+Dream execution itself now requires a live OpenCode server because the dreamer runs as a hidden child-session agent. Use `/ctx-dream` inside OpenCode for the actual maintenance pass.
 
 ---
 

@@ -1,4 +1,6 @@
 import type { Database } from "bun:sqlite";
+import type { DreamingConfig } from "../../config/schema/magic-context";
+import { runDream, type DreamRunResult } from "../../features/magic-context/dreamer";
 import { log, sessionLog } from "../../shared";
 import { runSidekick } from "../../features/magic-context/sidekick/agent";
 import type { SidekickConfig } from "../../features/magic-context/sidekick/types";
@@ -97,6 +99,72 @@ async function executeAugmentation(
     throw new Error(`${SENTINEL_PREFIX}CTX-AUG_HANDLED__`);
 }
 
+function summarizeDreamResult(result: DreamRunResult): string {
+    const taskLines = result.tasks.map((task: DreamRunResult["tasks"][number]) => {
+        const seconds = (task.durationMs / 1000).toFixed(1);
+        return task.error
+            ? `- ${task.name}: failed after ${seconds}s — ${task.error}`
+            : `- ${task.name}: completed in ${seconds}s`;
+    });
+
+    return [
+        "## /ctx-dream",
+        "",
+        `Started: ${new Date(result.startedAt).toISOString()}`,
+        `Finished: ${new Date(result.finishedAt).toISOString()}`,
+        `Lease holder: ${result.holderId}`,
+        "",
+        "### Tasks",
+        ...(taskLines.length > 0 ? taskLines : ["- No tasks ran."]),
+    ].join("\n");
+}
+
+async function executeDreaming(
+    deps: {
+        db: Database;
+        sendNotification: (
+            sessionId: string,
+            text: string,
+            params: NotificationParams,
+        ) => Promise<void>;
+        dreaming?: {
+            config: DreamingConfig;
+            projectPath: string;
+            client: unknown;
+            directory: string;
+            executeDream?: (sessionId: string) => Promise<DreamRunResult>;
+        };
+    },
+    sessionId: string,
+): Promise<never> {
+    if (!deps.dreaming?.config?.tasks?.length) {
+        await deps.sendNotification(
+            sessionId,
+            "## /ctx-dream\n\nDreaming is not configured for this project.",
+            {},
+        );
+        throw new Error(`${SENTINEL_PREFIX}CTX-DREAM_HANDLED__`);
+    }
+
+    await deps.sendNotification(sessionId, "Starting dream run...", {});
+
+    const result = deps.dreaming.executeDream
+        ? await deps.dreaming.executeDream(sessionId)
+        : await runDream({
+              db: deps.db,
+              client: deps.dreaming.client as never,
+              projectPath: deps.dreaming.projectPath,
+              tasks: deps.dreaming.config.tasks,
+              taskTimeoutMinutes: deps.dreaming.config.task_timeout_minutes,
+              maxRuntimeMinutes: deps.dreaming.config.max_runtime_minutes,
+              parentSessionId: sessionId,
+              sessionDirectory: deps.dreaming.directory,
+          });
+
+    await deps.sendNotification(sessionId, summarizeDreamResult(result), {});
+    throw new Error(`${SENTINEL_PREFIX}CTX-DREAM_HANDLED__`);
+}
+
 export function createMagicContextCommandHandler(deps: {
     db: Database;
     protectedTags: number;
@@ -117,11 +185,19 @@ export function createMagicContextCommandHandler(deps: {
         client: unknown;
         pendingResults: Map<string, string>;
     };
+    dreaming?: {
+        config: DreamingConfig;
+        projectPath: string;
+        client: unknown;
+        directory: string;
+        executeDream?: (sessionId: string) => Promise<DreamRunResult>;
+    };
 }) {
     const isStatusCommand = (command: string): boolean => command === "ctx-status";
     const isFlushCommand = (command: string): boolean => command === "ctx-flush";
     const isRecompCommand = (command: string): boolean => command === "ctx-recomp";
     const isAugCommand = (command: string): boolean => command === "ctx-aug";
+    const isDreamCommand = (command: string): boolean => command === "ctx-dream";
 
     return {
         "command.execute.before": async (
@@ -133,8 +209,9 @@ export function createMagicContextCommandHandler(deps: {
             const isFlush = isFlushCommand(input.command);
             const isRecomp = isRecompCommand(input.command);
             const isAug = isAugCommand(input.command);
+            const isDream = isDreamCommand(input.command);
 
-            if (!isStatus && !isFlush && !isRecomp && !isAug) {
+            if (!isStatus && !isFlush && !isRecomp && !isAug && !isDream) {
                 return;
             }
 
@@ -144,6 +221,11 @@ export function createMagicContextCommandHandler(deps: {
             if (isAug) {
                 await executeAugmentation(deps, sessionId, input.arguments);
                 return; // executeAugmentation throws sentinel internally
+            }
+
+            if (isDream) {
+                await executeDreaming(deps, sessionId);
+                return;
             }
 
             if (isFlush) {

@@ -10,26 +10,43 @@ export const DEFAULT_HISTORIAN_TIMEOUT_MS = 300_000;
 export const DEFAULT_HISTORY_BUDGET_PERCENTAGE = 0.15;
 export const DEFAULT_LOCAL_EMBEDDING_MODEL = "Xenova/all-MiniLM-L6-v2";
 
-export const DreamingTaskSchema = z.enum(["decay", "consolidate", "mine", "verify", "git", "map"]);
+export const DREAMER_TASKS = [
+    "consolidate",
+    "verify",
+    "archive-stale",
+    "improve",
+    "maintain-docs",
+] as const;
+
+export const DreamingTaskSchema = z.enum(DREAMER_TASKS);
+export type DreamingTask = z.infer<typeof DreamingTaskSchema>;
+
+export const DEFAULT_DREAMER_TASKS: DreamingTask[] = [
+    "consolidate",
+    "verify",
+    "archive-stale",
+    "improve",
+];
 
 export const DreamingConfigSchema = z
     .object({
+        /** Enable dreamer (default: false) */
         enabled: z.boolean().default(false),
+        /** Scheduled window for overnight dreaming (e.g. "02:00-06:00") */
         schedule: z.string().default("02:00-06:00"),
+        /** Maximum runtime per dream session in minutes (default: 120) */
         max_runtime_minutes: z.number().min(10).default(120),
-        endpoint: z.string().default("http://localhost:1234/v1"),
-        model: z.string().default("qwen3.5-32b"),
-        api_key: z.string().default(""),
-        tasks: z.array(DreamingTaskSchema).default(["decay", "consolidate"]),
+        /** Tasks to run during dreaming, in order (default: consolidate, verify, archive-stale, improve) */
+        tasks: z.array(DreamingTaskSchema).default(DEFAULT_DREAMER_TASKS),
+        /** Minutes allocated per task before moving to next (default: 20) */
+        task_timeout_minutes: z.number().min(5).default(20),
     })
     .default({
         enabled: false,
         schedule: "02:00-06:00",
         max_runtime_minutes: 120,
-        endpoint: "http://localhost:1234/v1",
-        model: "qwen3.5-32b",
-        api_key: "",
-        tasks: ["decay", "consolidate"],
+        tasks: DEFAULT_DREAMER_TASKS,
+        task_timeout_minutes: 20,
     });
 
 const BaseEmbeddingConfigSchema = z
@@ -84,6 +101,7 @@ export type DreamingConfig = z.infer<typeof DreamingConfigSchema>;
 export interface MagicContextConfig {
     enabled: boolean;
     historian?: z.infer<typeof AgentOverrideConfigSchema>;
+    dreamer?: z.infer<typeof AgentOverrideConfigSchema>;
     cache_ttl: string | { default: string; [modelKey: string]: string };
     nudge_interval_tokens: number;
     execute_threshold_percentage: number | { default: number; [modelKey: string]: number };
@@ -119,6 +137,8 @@ export const MagicContextConfigSchema = z
         enabled: z.boolean().default(false),
         /** Historian agent configuration (model, fallback_models, variant, temperature, maxTokens, permission, etc.) */
         historian: AgentOverrideConfigSchema.optional(),
+        /** Dreamer agent configuration (model, fallback_models, variant, temperature, etc.) */
+        dreamer: AgentOverrideConfigSchema.optional(),
         /** Cache TTL: string (e.g. "5m") or per-model object ({ default: "5m", "model-id": "10m" }) */
         cache_ttl: z
             .union([z.string(), z.object({ default: z.string() }).catchall(z.string())])

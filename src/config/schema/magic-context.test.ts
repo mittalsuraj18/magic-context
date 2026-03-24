@@ -14,7 +14,7 @@ describe("MagicContextConfigSchema", () => {
         it("applies defaults for an empty config", () => {
             const result = MagicContextConfigSchema.parse({});
 
-            expect(result).toEqual({
+            expect(result).toMatchObject({
                 enabled: false,
                 cache_ttl: "5m",
                 nudge_interval_tokens: DEFAULT_NUDGE_INTERVAL_TOKENS,
@@ -45,6 +45,15 @@ describe("MagicContextConfigSchema", () => {
                     timeout_ms: 30000,
                 },
             });
+            expect(result.dreaming).toEqual({
+                enabled: false,
+                schedule: "02:00-06:00",
+                max_runtime_minutes: 120,
+                tasks: ["consolidate", "verify", "archive-stale", "improve"],
+                task_timeout_minutes: 20,
+            });
+            expect(result.historian).toBeUndefined();
+            expect(result.dreamer).toBeUndefined();
         });
     });
 

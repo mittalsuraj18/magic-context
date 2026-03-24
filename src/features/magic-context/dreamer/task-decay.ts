@@ -1,3 +1,4 @@
+/** @deprecated Legacy deterministic dream task retained for fallback/debugging only. */
 import type { Database } from "bun:sqlite";
 import { archiveMemory, updateMemoryStatus } from "../memory/storage-memory";
 

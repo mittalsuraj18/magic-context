@@ -50,6 +50,7 @@ export function createSessionHooks(args: {
                 historian_timeout_ms: pluginConfig.historian_timeout_ms,
                 memory: pluginConfig.memory,
                 sidekick: pluginConfig.sidekick,
+                dreaming: pluginConfig.dreaming,
             },
         }),
     };

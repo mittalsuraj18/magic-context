@@ -1,13 +1,11 @@
 #!/usr/bin/env bun
 
-// Usage: bun scripts/dream.ts [--project-path <path>] [--tasks decay,consolidate]
+// Usage: bun scripts/dream.ts [--project-path <path>] [--tasks consolidate,verify]
 
 import path from "node:path";
 import { loadPluginConfig } from "../src/config";
 import { MagicContextConfigSchema } from "../src/config/schema/magic-context";
-import { initializeEmbedding, resolveProjectIdentity } from "../src/features/magic-context/memory";
-import { closeDatabase, openDatabase } from "../src/features/magic-context/storage";
-import { runDream } from "../src/features/magic-context/dreamer";
+import { resolveProjectIdentity } from "../src/features/magic-context/memory";
 
 interface ParsedArgs {
     projectPath: string;
@@ -49,20 +47,22 @@ function parseArgs(argv: string[]): ParsedArgs {
 async function main(): Promise<void> {
     const args = parseArgs(process.argv.slice(2));
     const pluginConfig = MagicContextConfigSchema.parse(loadPluginConfig(args.projectPath));
-    const db = openDatabase();
-
-    initializeEmbedding(pluginConfig.embedding);
-
     const projectIdentity = resolveProjectIdentity(args.projectPath);
-    const result = await runDream({
-        db,
-        projectPath: projectIdentity,
-        tasks: args.tasks ?? pluginConfig.dreaming?.tasks ?? ["decay", "consolidate"],
-        promotionThreshold: pluginConfig.memory.retrieval_count_promotion_threshold,
-        maxRuntimeMinutes: pluginConfig.dreaming?.max_runtime_minutes ?? 120,
-    });
+    const configuredTasks = args.tasks ?? pluginConfig.dreaming?.tasks ?? ["consolidate"];
 
-    console.log(JSON.stringify(result, null, 2));
+    console.log(
+        [
+            "magic-context dream runner requires a live OpenCode server because dreaming now uses child sessions.",
+            "",
+            `project: ${projectIdentity}`,
+            `tasks: ${configuredTasks.join(", ")}`,
+            "",
+            "Primary trigger path:",
+            "  /ctx-dream",
+            "",
+            "This script is currently a thin wrapper/documentation entrypoint only.",
+        ].join("\n"),
+    );
 }
 
 main()
@@ -70,6 +70,4 @@ main()
         console.error(error instanceof Error ? error.message : String(error));
         process.exitCode = 1;
     })
-    .finally(() => {
-        closeDatabase();
-    });
+    .finally(() => undefined);
