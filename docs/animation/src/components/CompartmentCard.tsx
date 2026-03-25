@@ -3,12 +3,10 @@ import { COLORS, FONT_FAMILY, FONT_FAMILY_MONO } from "../constants";
 
 interface CompartmentCardProps {
   enterProgress: number;
-  showExpandHint?: boolean;
 }
 
 export const CompartmentCard: React.FC<CompartmentCardProps> = ({
   enterProgress,
-  showExpandHint = false,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -25,11 +23,6 @@ export const CompartmentCard: React.FC<CompartmentCardProps> = ({
   });
 
   const ty = interpolate(entered, [0, 1], [10, 0]);
-
-  // Expand hint pulse
-  const hintOpacity = showExpandHint
-    ? Math.sin(frame * 0.15) * 0.3 + 0.7
-    : 0;
 
   return (
     <div
@@ -103,21 +96,6 @@ export const CompartmentCard: React.FC<CompartmentCardProps> = ({
       >
         5 messages · compressed by historian
       </div>
-
-      {/* Expand hint */}
-      {showExpandHint && (
-        <div
-          style={{
-            marginTop: 8,
-            fontFamily: FONT_FAMILY_MONO,
-            fontSize: 9,
-            color: COLORS.compartmentAccent,
-            opacity: hintOpacity,
-          }}
-        >
-          ctx_expand §1§–§5§
-        </div>
-      )}
     </div>
   );
 };

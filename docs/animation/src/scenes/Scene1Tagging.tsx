@@ -161,7 +161,11 @@ export const Scene1Tagging: React.FC = () => {
       </div>
 
       {/* Scene caption (Title Card) */}
-      <SceneCaption text="Tag everything." frame={globalFrame} />
+      <SceneCaption 
+        text="Tag everything." 
+        subtitle="System tags all messages"
+        frame={globalFrame} 
+      />
     </AbsoluteFill>
   );
 };

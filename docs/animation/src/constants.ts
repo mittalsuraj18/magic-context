@@ -4,9 +4,9 @@ export const COMP_HEIGHT = 720;
 export const FPS = 30;
 
 // Full animation: 45s = 1350 frames
-export const FULL_DURATION_FRAMES = 2190;
-// GIF loop: 21s = 630 frames (Scenes 0-2)
-export const LOOP_DURATION_FRAMES = 630;
+export const FULL_DURATION_FRAMES = 2386;
+// GIF loop: 27.5s = 826 frames (Scenes 0-2)
+export const LOOP_DURATION_FRAMES = 826;
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 export const PANEL_W = 660;
@@ -16,7 +16,7 @@ export const PANEL_H = 460;
 export const INTRO_DURATION = 75; // 2.5s narrative title card before scene
 
 // ─── Scene durations (frames) ─────────────────────────────────────────────────
-export const SCENE_0_DURATION = 120; // 4s
+export const SCENE_0_DURATION = 316; // 10.5s
 export const SCENE_1_DURATION = 225; // 7.5s (75 intro + 150 ui)
 export const SCENE_2_DURATION = 285; // 9.5s (75 intro + 210 ui)
 export const SCENE_3_DURATION = 465; // 15.5s (75 intro + 390 ui)
@@ -160,7 +160,9 @@ export const MEMORY_ITEMS = [
 
 // Dreamer pills for Scene 6
 export const DREAMER_PILLS = [
-  { icon: "✓", text: 'Merged: "JWT tokens" ← 2 duplicates', type: "success" },
-  { icon: "✓", text: "Verified: ARCHITECTURE.md in sync", type: "success" },
-  { icon: "⊘", text: 'Archived: "SQLite plans" (stale)', type: "archive" },
+  { icon: "🗜️", text: "Consolidate: merge similar memories", type: "success" },
+  { icon: "✓", text: "Verify: check memories against codebase", type: "success" },
+  { icon: "⊘", text: "Archive stale: retire removed features", type: "archive" },
+  { icon: "✍️", text: "Improve: rewrite into terse facts", type: "success" },
+  { icon: "📝", text: "Maintain docs: update ARCHITECTURE.md", type: "success" },
 ];

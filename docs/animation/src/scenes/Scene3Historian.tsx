@@ -108,7 +108,11 @@ export const Scene3Historian: React.FC = () => {
   return (
     <AbsoluteFill style={{ background: COLORS.bg }}>
       {/* Scene caption (Title Card) */}
-      <SceneCaption text="Compress history in the background." frame={globalFrame} />
+      <SceneCaption 
+        text="Compress history in the background." 
+        subtitle="Historian runs on the background while main agent keeps working without interruption."
+        frame={globalFrame} 
+      />
 
       {/* Title */}
       <div
@@ -196,7 +200,6 @@ export const Scene3Historian: React.FC = () => {
           {frame >= COMPARTMENT_ENTER && (
             <CompartmentCard
               enterProgress={compartmentEnterP}
-              showExpandHint={frame > COMPARTMENT_ENTER + 50}
             />
           )}
 
@@ -299,23 +302,10 @@ export const Scene3Historian: React.FC = () => {
             enterProgress={historianEnterP}
             exitProgress={historianExitP}
           >
-            <HistorianProgress />
+            <HistorianProgress localFrame={Math.max(0, frame - HISTORIAN_ENTER)} />
           </AgentPanel>
         </div>
       )}
-
-      {/* Context bar */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: 42,
-          left: "50%",
-          transform: "translateX(-50%)",
-          opacity: uiOpacity,
-        }}
-      >
-        <ContextBar pct={contextPct} />
-      </div>
     </AbsoluteFill>
   );
 };

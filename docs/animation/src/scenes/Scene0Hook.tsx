@@ -10,15 +10,15 @@ export const Scene0Hook: React.FC = () => {
 
   // Frame ranges
   const PROMISE_START = 0;
-  const PROMISE_END = 60;       // slower typing (2s)
-  const FAST_FORWARD_START = 70; // hold 10 frames
-  const FAST_FORWARD_END = 80;  // 10 frames blur
-  const FORGOTTEN_START = 80;
-  const FORGOTTEN_END = 100;    // 20 frames AI reply
-  const PULSE_START = 100;
-  const PULSE_END = 106;        // 6 frames pulse
-  const TITLE_START = 106;
-  const TITLE_END = 120;        // 14 frames title hold
+  const PROMISE_END = 90;       // slower typing (3s)
+  const FAST_FORWARD_START = 110; // hold 20 frames
+  const FAST_FORWARD_END = 140;  // 30 frames blur (1s)
+  const FORGOTTEN_START = 140;
+  const FORGOTTEN_END = 200;    // 60 frames AI reply (2s)
+  const PULSE_START = 220;
+  const PULSE_END = 226;        // 6 frames pulse
+  const TITLE_START = 226;
+  const TITLE_END = 316;        // 90 frames title hold (3s)
 
   // Promise message typing animation
   const promiseText = "I'll refactor the auth module after we finish the API.";
@@ -34,7 +34,7 @@ export const Scene0Hook: React.FC = () => {
   // Fast-forward blur effect
   const fastForwardOpacity = interpolate(
     frame,
-    [FAST_FORWARD_START, FAST_FORWARD_START + 3, FAST_FORWARD_END - 3, FAST_FORWARD_END],
+    [FAST_FORWARD_START, FAST_FORWARD_START + 10, FAST_FORWARD_END - 10, FAST_FORWARD_END],
     [0, 1, 1, 0],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
   );
@@ -66,7 +66,7 @@ export const Scene0Hook: React.FC = () => {
   // Title card
   const titleOpacity = interpolate(
     frame,
-    [TITLE_START, TITLE_START + 5, TITLE_END - 5, TITLE_END],
+    [TITLE_START, TITLE_START + 15, TITLE_END - 15, TITLE_END],
     [0, 1, 1, 0],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
   );
@@ -201,21 +201,6 @@ export const Scene0Hook: React.FC = () => {
             </div>
           </div>
         )}
-
-        {/* Context bar */}
-        {frame >= FAST_FORWARD_START && (
-          <div
-            style={{
-              position: "absolute",
-              bottom: 60,
-              left: "50%",
-              transform: "translateX(-50%)",
-              opacity: pulse,
-            }}
-          >
-            <ContextBar pct={contextPct} />
-          </div>
-        )}
       </div>
 
       {/* Title card (after smash cut) */}
@@ -240,6 +225,23 @@ export const Scene0Hook: React.FC = () => {
             }}
           >
             magic-context
+          </div>
+          <div
+            style={{
+              width: 400,
+              height: 1,
+              background: COLORS.panelBorder,
+              margin: "16px auto",
+            }}
+          />
+          <div
+            style={{
+              fontFamily: FONT_FAMILY,
+              fontSize: 20,
+              color: COLORS.textSecondary,
+            }}
+          >
+            Keep the plot. Lose the bloat.
           </div>
         </div>
       )}

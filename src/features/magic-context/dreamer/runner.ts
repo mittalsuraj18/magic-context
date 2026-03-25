@@ -86,17 +86,20 @@ export async function runDream(args: {
             log(`[dreamer] starting task: ${taskName}`);
             const taskStartedAt = Date.now();
             let agentSessionId: string | null = null;
+            // AbortController lets us cancel the in-flight LLM prompt immediately when lease is lost
+            const taskAbortController = new AbortController();
             // Renew lease periodically while the LLM task runs (can take 5+ min on slow models)
-            let leaseRenewalAborted = false;
             const leaseRenewalInterval = setInterval(() => {
                 try {
                     if (!renewLease(args.db, holderId)) {
-                        log(`[dreamer] task ${taskName}: lease renewal failed — aborting task`);
-                        leaseRenewalAborted = true;
+                        log(`[dreamer] task ${taskName}: lease renewal failed — aborting LLM call`);
+                        taskAbortController.abort();
                     }
                 } catch (err) {
-                    log(`[dreamer] task ${taskName}: lease renewal threw — aborting task: ${err}`);
-                    leaseRenewalAborted = true;
+                    log(
+                        `[dreamer] task ${taskName}: lease renewal threw — aborting LLM call: ${err}`,
+                    );
+                    taskAbortController.abort();
                 }
             }, 60_000);
 
@@ -145,14 +148,11 @@ export async function runDream(args: {
                             parts: [{ type: "text", text: taskPrompt }],
                         },
                     },
-                    { timeoutMs: args.taskTimeoutMinutes * 60 * 1000 },
+                    {
+                        timeoutMs: args.taskTimeoutMinutes * 60 * 1000,
+                        signal: taskAbortController.signal,
+                    },
                 );
-
-                if (leaseRenewalAborted) {
-                    throw new Error(
-                        "Lease lost during task execution — aborting to prevent dual-execution",
-                    );
-                }
 
                 const messagesResponse = await args.client.session.messages({
                     path: { id: agentSessionId },

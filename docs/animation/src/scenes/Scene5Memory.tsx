@@ -44,8 +44,6 @@ export const Scene5Memory: React.FC = () => {
     [0, 1],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
   );
-  const panelOpacity = 1 - closeProgress * 0.9;
-  const panelScale = 1 - closeProgress * 0.05;
 
   // Session open animation
   const openProgress = interpolate(
@@ -54,6 +52,9 @@ export const Scene5Memory: React.FC = () => {
     [0, 1],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
   );
+
+  const panelOpacity = 1 - closeProgress * 0.9 + openProgress * 0.9;
+  const panelScale = 1 - closeProgress * 0.05 + openProgress * 0.05;
 
   // "Session ended" label
   const sessionEndedOpacity = interpolate(
@@ -81,7 +82,11 @@ export const Scene5Memory: React.FC = () => {
   return (
     <AbsoluteFill style={{ background: COLORS.bg }}>
       {/* Scene caption (Title Card) */}
-      <SceneCaption text="New sessions start with memory." frame={globalFrame} />
+      <SceneCaption 
+        text="New sessions start with memory." 
+        subtitle="Important facts and memories are injected to all sessions for the project."
+        frame={globalFrame} 
+      />
 
       {/* Title */}
       <div
@@ -217,19 +222,6 @@ export const Scene5Memory: React.FC = () => {
             </div>
           )}
         </div>
-      </div>
-
-      {/* Context bar */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: 42,
-          left: "50%",
-          transform: "translateX(-50%)",
-          opacity: uiOpacity,
-        }}
-      >
-        <ContextBar pct={contextPct} />
       </div>
     </AbsoluteFill>
   );

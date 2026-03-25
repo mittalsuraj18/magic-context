@@ -31,10 +31,10 @@ export const Scene6Dreamer: React.FC = () => {
   const NIGHT_START = 10;
   const NIGHT_END = 30;
   const DREAMER_ENTER = 30;
-  const DREAMER_EXIT = 100;
   const PILL_START = 50;
-  const DAY_START = 90;
-  const DAY_END = 110;
+  const DREAMER_EXIT = 170;
+  const DAY_START = 160;
+  const DAY_END = 180;
 
   // Night mode transition
   const nightProgress = interpolate(
@@ -85,7 +85,11 @@ export const Scene6Dreamer: React.FC = () => {
   return (
     <AbsoluteFill style={{ background }}>
       {/* Scene caption (Title Card) */}
-      <SceneCaption text="Overnight maintenance while you sleep." frame={globalFrame} />
+      <SceneCaption 
+        text="Overnight maintenance while you sleep." 
+        subtitle="Dreamer consolidates, verifies, and improves project memories."
+        frame={globalFrame} 
+      />
 
       {/* Title */}
       <div
@@ -166,7 +170,7 @@ export const Scene6Dreamer: React.FC = () => {
                 const pillEntered = spring({
                   frame: frame - pillEnterFrame,
                   fps,
-                  config: { damping: 18, stiffness: 260 },
+                  config: { damping: 20, stiffness: 180 },
                 });
                 const pillOpacity = interpolate(pillEntered, [0, 0.5], [0, 1], {
                   extrapolateLeft: "clamp",
@@ -215,7 +219,8 @@ export const Scene6Dreamer: React.FC = () => {
             </div>
 
             {/* Memory quality bar */}
-            <div style={{ marginTop: 16 }}>
+            {frame >= PILL_START + DREAMER_PILLS.length * 15 && (
+              <div style={{ marginTop: 16 }}>
               <div
                 style={{
                   display: "flex",
@@ -251,33 +256,20 @@ export const Scene6Dreamer: React.FC = () => {
                   overflow: "hidden",
                 }}
               >
-                <div
-                  style={{
-                    height: "100%",
-                    width: `${memoryQuality}%`,
-                    background: COLORS.dreamerAccent,
-                    borderRadius: 999,
-                    transition: "width 0.3s ease-out",
-                  }}
-                />
+                  <div
+                    style={{
+                      height: "100%",
+                      width: `${memoryQuality}%`,
+                      background: COLORS.dreamerAccent,
+                      borderRadius: 999,
+                    }}
+                  />
+                </div>
               </div>
-            </div>
+            )}
           </AgentPanel>
         </div>
       )}
-
-      {/* Context bar */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: 42,
-          left: "50%",
-          transform: "translateX(-50%)",
-          opacity: uiOpacity,
-        }}
-      >
-        <ContextBar pct={30} />
-      </div>
     </AbsoluteFill>
   );
 };

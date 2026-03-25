@@ -61,7 +61,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
   return (
     <div
       style={{
-        width: 190,
+        width: type === "dreamer" ? 300 : 210,
         background: config.bg,
         border: `1.5px solid ${config.border}`,
         borderRadius: 14,
@@ -146,11 +146,21 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
 };
 
 // Sub-component for Historian progress lines
-export const HistorianProgress: React.FC = () => {
-  const frame = useCurrentFrame();
-  const d1 = Math.sin(frame * 0.22) * 0.5 + 0.5;
-  const d2 = Math.sin(frame * 0.22 + 2.1) * 0.5 + 0.5;
-  const d3 = Math.sin(frame * 0.22 + 4.2) * 0.5 + 0.5;
+export const HistorianProgress: React.FC<{ localFrame: number }> = ({ localFrame }) => {
+  const d1 = Math.sin(localFrame * 0.22) * 0.5 + 0.5;
+  const d2 = Math.sin(localFrame * 0.22 + 2.1) * 0.5 + 0.5;
+  const d3 = Math.sin(localFrame * 0.22 + 4.2) * 0.5 + 0.5;
+
+  let stateText = "Summarising";
+  let bottomText = "§1§–§5§ → summarise";
+
+  if (localFrame > 140) {
+    stateText = "Merging compartments";
+    bottomText = "§1§–§24§ → merge & compact";
+  } else if (localFrame > 70) {
+    stateText = "Extracting facts";
+    bottomText = "+3 project memories";
+  }
 
   return (
     <>
@@ -170,7 +180,7 @@ export const HistorianProgress: React.FC = () => {
             border: `2px solid ${COLORS.historianBorder}`,
             borderTop: `2px solid ${COLORS.historianAccent}`,
             borderRadius: "50%",
-            transform: `rotate(${(frame * 7) % 360}deg)`,
+            transform: `rotate(${(localFrame * 7) % 360}deg)`,
             flexShrink: 0,
           }}
         />
@@ -181,7 +191,7 @@ export const HistorianProgress: React.FC = () => {
             color: COLORS.textSecondary,
           }}
         >
-          Summarising
+          {stateText}
         </span>
         <div style={{ display: "flex", gap: 3 }}>
           {[d1, d2, d3].map((d, i) => (
@@ -229,13 +239,13 @@ export const HistorianProgress: React.FC = () => {
           marginTop: 9,
           fontFamily: FONT_FAMILY_MONO,
           fontSize: 9,
-          color: COLORS.textMuted,
+          color: localFrame > 70 ? COLORS.contextGreen : COLORS.textMuted,
           background: `${COLORS.historianAccent}12`,
           padding: "3px 7px",
           borderRadius: 5,
         }}
       >
-        §1§–§5§ → summarise
+        {bottomText}
       </div>
     </>
   );

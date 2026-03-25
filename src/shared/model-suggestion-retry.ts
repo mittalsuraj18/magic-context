@@ -18,6 +18,8 @@ type PromptArgs = {
 
 export interface PromptRetryOptions {
     timeoutMs?: number;
+    /** External abort signal — cancels the in-flight LLM prompt immediately when aborted */
+    signal?: AbortSignal;
 }
 
 export interface ModelSuggestionInfo {
@@ -91,9 +93,14 @@ async function promptWithTimeout(
     client: Client,
     args: PromptArgs,
     timeoutMs: number,
+    signal?: AbortSignal,
 ): Promise<void> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    // Link external signal to internal controller so external abort cancels the fetch
+    const onExternalAbort = () => controller.abort();
+    signal?.addEventListener("abort", onExternalAbort);
 
     try {
         await client.session.prompt({
@@ -101,12 +108,16 @@ async function promptWithTimeout(
             signal: controller.signal,
         } as Parameters<typeof client.session.prompt>[0]);
     } catch (error) {
+        if (signal?.aborted) {
+            throw new Error("prompt aborted by external signal");
+        }
         if (controller.signal.aborted) {
             throw new Error(`prompt timed out after ${timeoutMs}ms`);
         }
         throw error;
     } finally {
         clearTimeout(timeout);
+        signal?.removeEventListener("abort", onExternalAbort);
     }
 }
 
@@ -118,7 +129,7 @@ export async function promptSyncWithModelSuggestionRetry(
     const timeoutMs = options.timeoutMs ?? 300_000;
 
     try {
-        await promptWithTimeout(client, args, timeoutMs);
+        await promptWithTimeout(client, args, timeoutMs, options.signal);
     } catch (error) {
         const suggestion = parseModelSuggestion(error);
         if (!suggestion || !args.body.model) {
@@ -143,6 +154,7 @@ export async function promptSyncWithModelSuggestionRetry(
                 },
             },
             timeoutMs,
+            options.signal,
         );
     }
 }

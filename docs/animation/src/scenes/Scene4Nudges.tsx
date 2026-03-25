@@ -2,10 +2,10 @@ import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
 import {
   COLORS,
   FONT_FAMILY,
+  FONT_FAMILY_MONO,
   PANEL_W,
   PANEL_H,
   SCENE_4_DURATION,
-  MESSAGE_STAGGER_FAST,
   INTRO_DURATION,
 } from "../constants";
 import { SkeletonMessage } from "../components/SkeletonMessage";
@@ -16,14 +16,6 @@ import { CommandChip } from "../components/CommandChip";
 
 // Scene 4: Nudge Escalation (690-870 frames, 6s)
 // "Progressive pressure, not surprise failures."
-
-// Generate many messages for time-lapse effect
-const NUDGE_MESSAGES = Array.from({ length: 20 }, (_, i) => ({
-  id: i + 1,
-  role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
-  tag: i + 1,
-  barWidth: 55 + Math.random() * 30,
-}));
 
 export const Scene4Nudges: React.FC = () => {
   const globalFrame = useCurrentFrame();
@@ -38,44 +30,18 @@ export const Scene4Nudges: React.FC = () => {
   );
 
   // Frame ranges
-  const NUDGE_55_ENTER = 30;
-  const NUDGE_55_EXIT = 80;
-  const NUDGE_65_ENTER = 80;
-  const NUDGE_65_EXIT = 130;
-  const NUDGE_80_ENTER = 130;
-  const NUDGE_80_EXIT = 180;
-  const COMMAND_ENTER = 160;
+  const MSG1_ENTER = 20;
+  const MSG2_ENTER = 50;
+  const MSG3_ENTER = 80;
+  const INJECT_START = 120;
 
-  // Calculate visible messages (fast stagger)
-  const numVisible = NUDGE_MESSAGES.filter(
-    (_, i) => frame >= i * MESSAGE_STAGGER_FAST
-  ).length;
-
-  // Context bar climbs: 30% → 55% → 65% → 80% → 40%
-  let contextPct: number;
-  if (frame < NUDGE_55_ENTER) {
-    contextPct = 30;
-  } else if (frame < NUDGE_65_ENTER) {
-    contextPct = interpolate(frame, [NUDGE_55_ENTER, NUDGE_55_EXIT], [30, 55], {
-      extrapolateLeft: "clamp",
-      extrapolateRight: "clamp",
-    });
-  } else if (frame < NUDGE_80_ENTER) {
-    contextPct = interpolate(frame, [NUDGE_65_ENTER, NUDGE_65_EXIT], [55, 65], {
-      extrapolateLeft: "clamp",
-      extrapolateRight: "clamp",
-    });
-  } else if (frame < COMMAND_ENTER) {
-    contextPct = interpolate(frame, [NUDGE_80_ENTER, NUDGE_80_EXIT], [65, 80], {
-      extrapolateLeft: "clamp",
-      extrapolateRight: "clamp",
-    });
-  } else {
-    contextPct = interpolate(frame, [COMMAND_ENTER, COMMAND_ENTER + 30], [80, 40], {
-      extrapolateLeft: "clamp",
-      extrapolateRight: "clamp",
-    });
-  }
+  // Injection animation
+  const injectProgress = interpolate(
+    frame,
+    [INJECT_START, INJECT_START + 20],
+    [0, 1],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+  );
 
   // Panel position
   const panelLeft = (1280 - PANEL_W) / 2;
@@ -84,7 +50,11 @@ export const Scene4Nudges: React.FC = () => {
   return (
     <AbsoluteFill style={{ background: COLORS.bg }}>
       {/* Scene caption (Title Card) */}
-      <SceneCaption text="Escalating nudges before you hit the wall." frame={globalFrame} />
+      <SceneCaption 
+        text="Escalating nudges before you hit the wall." 
+        subtitle="Agent gets reminders about previously taken notes and nudges to drop unnecessary context."
+        frame={globalFrame} 
+      />
 
       {/* Title */}
       <div
@@ -123,38 +93,6 @@ export const Scene4Nudges: React.FC = () => {
           Nudge System
         </div>
       </div>
-
-      {/* Nudge banners */}
-      {frame >= NUDGE_55_ENTER && frame < NUDGE_55_EXIT && (
-        <div style={{ opacity: uiOpacity }}>
-          <NudgeBanner
-            level="gentle"
-            pct={55}
-            enterFrame={NUDGE_55_ENTER}
-            exitFrame={NUDGE_55_EXIT}
-          />
-        </div>
-      )}
-      {frame >= NUDGE_65_ENTER && frame < NUDGE_65_EXIT && (
-        <div style={{ opacity: uiOpacity }}>
-          <NudgeBanner
-            level="bolder"
-            pct={65}
-            enterFrame={NUDGE_65_ENTER}
-            exitFrame={NUDGE_65_EXIT}
-          />
-        </div>
-      )}
-      {frame >= NUDGE_80_ENTER && frame < NUDGE_80_EXIT && (
-        <div style={{ opacity: uiOpacity }}>
-          <NudgeBanner
-            level="critical"
-            pct={80}
-            enterFrame={NUDGE_80_ENTER}
-            exitFrame={NUDGE_80_EXIT}
-          />
-        </div>
-      )}
 
       {/* Main panel */}
       <div
@@ -199,47 +137,56 @@ export const Scene4Nudges: React.FC = () => {
         </div>
 
         {/* Message area */}
-        <div style={{ padding: "18px 20px", overflow: "hidden" }}>
-          {NUDGE_MESSAGES.slice(0, numVisible).map((msg, i) => (
-            <SkeletonMessage
-              key={msg.id}
-              widthPercent={msg.barWidth}
-              role={msg.role}
-              enterFrame={i * MESSAGE_STAGGER_FAST}
-              tag={msg.tag}
-            />
-          ))}
+        <div style={{ padding: "18px 20px", overflow: "hidden", display: "flex", flexDirection: "column", gap: 12 }}>
+          {frame >= MSG1_ENTER && (
+            <SkeletonMessage widthPercent={62} role="user" enterFrame={MSG1_ENTER} tag={1} />
+          )}
+          {frame >= MSG2_ENTER && (
+            <SkeletonMessage widthPercent={88} role="assistant" enterFrame={MSG2_ENTER} tag={2} />
+          )}
+          
+          {/* Third message (grows to show system injection) */}
+          {frame >= MSG3_ENTER && (
+            <div style={{
+              alignSelf: "flex-end",
+              width: "75%",
+              background: COLORS.userBar,
+              borderRadius: 8,
+              padding: "12px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+              opacity: interpolate(frame, [MSG3_ENTER, MSG3_ENTER + 10], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }),
+              transform: `translateY(${interpolate(frame, [MSG3_ENTER, MSG3_ENTER + 10], [10, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })}px)`,
+            }}>
+              {/* Original user message bar */}
+              <div style={{ width: "80%", height: 16, background: "rgba(255,255,255,0.2)", borderRadius: 4 }} />
+              
+              {/* System Injection Expandable Area */}
+              {frame >= INJECT_START && (
+                <div style={{
+                  background: "rgba(0,0,0,0.3)",
+                  borderRadius: 6,
+                  borderLeft: `3px solid ${COLORS.contextAmber}`,
+                  padding: "8px 12px",
+                  marginTop: 4,
+                  overflow: "hidden",
+                  height: interpolate(injectProgress, [0, 1], [0, 60]),
+                  opacity: injectProgress,
+                }}>
+                  <div style={{ fontFamily: FONT_FAMILY_MONO, fontSize: 10, color: COLORS.contextAmber, marginBottom: 6, fontWeight: 600 }}>
+                    [SYSTEM REMINDER]
+                  </div>
+                  <div style={{ fontFamily: FONT_FAMILY, fontSize: 11, color: COLORS.textSecondary, lineHeight: 1.4 }}>
+                    Context at 80%. Please use ctx_reduce to drop old logs.
+                    <br />
+                    Note: Migration to Postgres is in progress.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
-      </div>
-
-      {/* Command chip (AI response) */}
-      {frame >= COMMAND_ENTER && (
-        <div
-          style={{
-            position: "absolute",
-            top: panelTop + PANEL_H - 60,
-            left: panelLeft + 20,
-            opacity: uiOpacity,
-          }}
-        >
-          <CommandChip
-            command="ctx_reduce(...)"
-            enterFrame={COMMAND_ENTER}
-          />
-        </div>
-      )}
-
-      {/* Context bar */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: 42,
-          left: "50%",
-          transform: "translateX(-50%)",
-          opacity: uiOpacity,
-        }}
-      >
-        <ContextBar pct={contextPct} />
       </div>
     </AbsoluteFill>
   );
