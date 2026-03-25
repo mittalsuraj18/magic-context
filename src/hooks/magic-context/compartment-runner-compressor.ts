@@ -12,7 +12,7 @@ import { getErrorMessage } from "../../shared/error-message";
 import { sessionLog } from "../../shared/logger";
 import { extractLatestAssistantText } from "../../tools/look-at/assistant-message-extractor";
 import { parseCompartmentOutput } from "./compartment-parser";
-import { buildCompressorPrompt, COMPRESSOR_AGENT_SYSTEM_PROMPT } from "./compartment-prompt";
+import { buildCompressorPrompt } from "./compartment-prompt";
 import { estimateTokens } from "./read-session-formatting";
 
 const HISTORIAN_AGENT = "historian";

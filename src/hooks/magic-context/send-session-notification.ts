@@ -1,5 +1,5 @@
 import { getErrorMessage } from "../../shared/error-message";
-import { log, sessionLog } from "../../shared/logger";
+import { sessionLog } from "../../shared/logger";
 
 export interface NotificationParams {
     agent?: string;
