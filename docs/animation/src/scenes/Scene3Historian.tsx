@@ -108,10 +108,9 @@ export const Scene3Historian: React.FC = () => {
   return (
     <AbsoluteFill style={{ background: COLORS.bg }}>
       {/* Scene caption (Title Card) */}
-      <SceneCaption 
-        text="Compress history in the background." 
-        subtitle="Historian runs on the background while main agent keeps working without interruption."
-        frame={globalFrame} 
+      <SceneCaption
+        text="Historian runs on the background while main agent keeps working without interruption."
+        frame={globalFrame}
       />
 
       {/* Title */}

@@ -18,7 +18,7 @@ const AGENT_CONFIG = {
     border: COLORS.historianBorder,
   },
   dreamer: {
-    icon: "☾",
+    icon: "🌙",
     title: "Dreamer",
     subtitle: "night maintenance",
     accent: COLORS.dreamerAccent,
@@ -61,7 +61,7 @@ export const AgentPanel: React.FC<AgentPanelProps> = ({
   return (
     <div
       style={{
-        width: type === "dreamer" ? 300 : 210,
+        width: type === "dreamer" ? 600 : 210,
         background: config.bg,
         border: `1.5px solid ${config.border}`,
         borderRadius: 14,

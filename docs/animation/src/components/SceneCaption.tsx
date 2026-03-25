@@ -31,6 +31,7 @@ export const SceneCaption: React.FC<SceneCaptionProps> = ({
         left: 0,
         right: 0,
         bottom: 0,
+          inset: "50px",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -54,7 +55,6 @@ export const SceneCaption: React.FC<SceneCaptionProps> = ({
             color: COLORS.textPrimary,
             letterSpacing: "0.02em",
             textAlign: "center",
-            maxWidth: "80%",
           }}
         >
           {text}
@@ -66,7 +66,6 @@ export const SceneCaption: React.FC<SceneCaptionProps> = ({
               fontSize: 20,
               color: COLORS.textSecondary,
               textAlign: "center",
-              maxWidth: "80%",
               lineHeight: 1.4,
             }}
           >

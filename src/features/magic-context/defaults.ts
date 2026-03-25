@@ -1,1 +1,1 @@
-export const DEFAULT_PROTECTED_TAGS = 5;
+export const DEFAULT_PROTECTED_TAGS = 20;

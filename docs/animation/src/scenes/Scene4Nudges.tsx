@@ -50,10 +50,9 @@ export const Scene4Nudges: React.FC = () => {
   return (
     <AbsoluteFill style={{ background: COLORS.bg }}>
       {/* Scene caption (Title Card) */}
-      <SceneCaption 
-        text="Escalating nudges before you hit the wall." 
-        subtitle="Agent gets reminders about previously taken notes and nudges to drop unnecessary context."
-        frame={globalFrame} 
+      <SceneCaption
+        text="Agent gets reminders about previously taken notes and nudges to drop unnecessary context."
+        frame={globalFrame}
       />
 
       {/* Title */}
@@ -144,7 +143,7 @@ export const Scene4Nudges: React.FC = () => {
           {frame >= MSG2_ENTER && (
             <SkeletonMessage widthPercent={88} role="assistant" enterFrame={MSG2_ENTER} tag={2} />
           )}
-          
+
           {/* Third message (grows to show system injection) */}
           {frame >= MSG3_ENTER && (
             <div style={{
@@ -161,7 +160,7 @@ export const Scene4Nudges: React.FC = () => {
             }}>
               {/* Original user message bar */}
               <div style={{ width: "80%", height: 16, background: "rgba(255,255,255,0.2)", borderRadius: 4 }} />
-              
+
               {/* System Injection Expandable Area */}
               {frame >= INJECT_START && (
                 <div style={{

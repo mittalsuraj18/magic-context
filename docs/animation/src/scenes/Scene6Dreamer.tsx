@@ -79,16 +79,16 @@ export const Scene6Dreamer: React.FC = () => {
   );
 
   // Panel position
-  const panelLeft = (1280 - 400) / 2;
+  const panelLeft = (1280 - 600) / 2;
   const panelTop = 200;
 
   return (
     <AbsoluteFill style={{ background }}>
       {/* Scene caption (Title Card) */}
-      <SceneCaption 
-        text="Overnight maintenance while you sleep." 
+      <SceneCaption
+        text="Overnight maintenance while you sleep."
         subtitle="Dreamer consolidates, verifies, and improves project memories."
-        frame={globalFrame} 
+        frame={globalFrame}
       />
 
       {/* Title */}
@@ -183,7 +183,7 @@ export const Scene6Dreamer: React.FC = () => {
 
                 const pillColors: Record<string, string> = {
                   success: COLORS.contextGreen,
-                  archive: COLORS.textMuted,
+                  archive: COLORS.contextGreen,
                 };
 
                 return (
@@ -201,7 +201,7 @@ export const Scene6Dreamer: React.FC = () => {
                       transform: `translateX(${pillTranslateX}px)`,
                     }}
                   >
-                    <span style={{ fontSize: 11, color: pillColors[pill.type] }}>
+                    <span style={{ fontSize: 14, color: pillColors[pill.type] }}>
                       {pill.icon}
                     </span>
                     <span

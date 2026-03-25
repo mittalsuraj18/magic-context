@@ -11,6 +11,10 @@
 </p>
 
 <p align="center">
+  <img src="docs/animation/out/optimized2.gif" alt="Magic Context in action" width="720">
+</p>
+
+<p align="center">
   <a href="#get-started">Get Started</a> ·
   <a href="#what-is-magic-context">What is Magic Context?</a> ·
   <a href="#what-your-agent-gets">What Your Agent Gets</a> ·
@@ -48,10 +52,11 @@ Create `magic-context.jsonc` in your project root, `.opencode/`, or `~/.config/o
 {
   "enabled": true,
 
-  // Which model the historian uses for background compression
+  // Which model the historian uses for background compression, 
+  // Prefer providers that charge by request instead of tokens
   "historian": {
-    "model": "anthropic/claude-sonnet-4-6",
-    "fallback_models": ["anthropic/claude-3-5-haiku"]
+    "model": "github-copilot/gpt-5.4",
+    "fallback_models": ["opencode-go/glm-5"]
   }
 }
 ```
@@ -141,7 +146,7 @@ Every message, tool output, and file attachment gets a monotonically increasing 
 
 When the agent calls `ctx_reduce`, drops go into a pending queue — not applied immediately. Two conditions trigger execution:
 
-- **Cache expired** — enough time has passed that the cached prefix is likely stale (configurable, default 5 minutes)
+- **Cache expired** — enough time has passed that the cached prefix is likely stale (configurable per model, default 5 minutes)
 - **Threshold reached** — context usage hits `execute_threshold_percentage` (default 65%)
 
 Between triggers, the conversation continues unchanged. The agent doesn't need to think about timing.
@@ -206,7 +211,7 @@ All settings live in `magic-context.jsonc` as flat top-level keys. See **[CONFIG
 
 ## Storage
 
-All durable state lives in a local SQLite database. If the database can't be opened, Magic Context disables itself and notifies the user.
+All durable states live in a local SQLite database. If the database can't be opened, Magic Context disables itself and notifies the user.
 
 ```
 ~/.local/share/opencode/storage/plugin/magic-context/context.db

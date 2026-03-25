@@ -91,10 +91,9 @@ export const Scene2Reduce: React.FC = () => {
   return (
     <AbsoluteFill style={{ background: COLORS.bg, opacity: sceneEndFade }}>
       {/* Scene caption (Title Card) */}
-      <SceneCaption 
-        text="Drop bloat, not context." 
-        subtitle="Agent chooses what to drop"
-        frame={globalFrame} 
+      <SceneCaption
+        text="Agent chooses what to drop"
+        frame={globalFrame}
       />
 
       {/* Title */}

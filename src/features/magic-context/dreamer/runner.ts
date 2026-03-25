@@ -72,6 +72,30 @@ export async function runDream(args: {
     }
     log(`[dreamer] lease acquired: ${holderId}`);
 
+    // Resolve a parent session ID so child sessions are hidden from the UI session list.
+    // /ctx-dream passes the active session; scheduled runs resolve from the API.
+    let parentSessionId = args.parentSessionId;
+    if (!parentSessionId) {
+        try {
+            const sessionDir = args.sessionDirectory ?? args.projectPath;
+            const listResponse = await args.client.session.list({
+                query: { directory: sessionDir },
+            });
+            const sessions = shared.normalizeSDKResponse(listResponse, [] as { id?: string }[], {
+                preferResponseOnMissingData: true,
+            });
+            // Intentional: any existing session works — we just need parentID so child sessions don't appear in the UI
+            parentSessionId = sessions?.find((s) => typeof s?.id === "string")?.id;
+            if (parentSessionId) {
+                log(`[dreamer] resolved parent session: ${parentSessionId}`);
+            }
+        } catch {
+            log(
+                "[dreamer] could not resolve parent session — child sessions will be visible in UI",
+            );
+        }
+    }
+
     const deadline = startedAt + args.maxRuntimeMinutes * 60 * 1000;
     const lastDreamAt = getDreamState(args.db, "last_dream_at");
     log(`[dreamer] last dream at: ${lastDreamAt ?? "never"}`);
@@ -120,7 +144,7 @@ export async function runDream(args: {
 
                 const createResponse = await args.client.session.create({
                     body: {
-                        ...(args.parentSessionId ? { parentID: args.parentSessionId } : {}),
+                        ...(parentSessionId ? { parentID: parentSessionId } : {}),
                         title: `magic-context-dream-${taskName}`,
                     },
                     query: { directory: args.sessionDirectory ?? args.projectPath },
