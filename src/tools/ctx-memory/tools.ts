@@ -500,9 +500,12 @@ function createCtxMemoryTool(deps: CtxMemoryToolDeps): ToolDefinition {
                     Array.from(
                         new Set(
                             sourceMemories.flatMap((memory) => {
-                                const parsed = memory.mergedFrom
-                                    ? JSON.parse(memory.mergedFrom)
-                                    : [];
+                                let parsed: unknown[];
+                                try {
+                                    parsed = memory.mergedFrom ? JSON.parse(memory.mergedFrom) : [];
+                                } catch {
+                                    parsed = [];
+                                }
                                 return [
                                     memory.id,
                                     ...(Array.isArray(parsed)

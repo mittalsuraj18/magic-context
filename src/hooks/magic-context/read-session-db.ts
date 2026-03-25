@@ -43,6 +43,7 @@ export function withReadOnlySessionDb<T>(fn: (db: Database) => T): T {
     return fn(getReadOnlySessionDb());
 }
 
+// Intentional: exported for tests; production relies on process-exit cleanup (same as closeDatabase)
 export function closeReadOnlySessionDb(): void {
     closeCachedReadOnlyDb();
 }

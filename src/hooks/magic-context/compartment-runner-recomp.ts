@@ -225,6 +225,7 @@ export async function executeContextRecompInternal(deps: CompartmentRunnerDeps):
                 ...candidateCompartments,
                 ...(validatedPass.compartments ?? []),
             ];
+            // Intentional: facts are replaced each pass (historian returns complete updated set), while compartments accumulate
             candidateFacts = validatedPass.facts ?? [];
             passCount += 1;
             currentTokenBudget = tokenBudget;
@@ -261,6 +262,7 @@ export async function executeContextRecompInternal(deps: CompartmentRunnerDeps):
         if (!promoted) {
             // Fallback: direct write if promotion somehow fails
             replaceAllCompartmentState(db, sessionId, candidateCompartments, candidateFacts);
+            clearRecompStaging(db, sessionId);
         }
 
         const finalCompartments = promoted?.compartments ?? candidateCompartments;

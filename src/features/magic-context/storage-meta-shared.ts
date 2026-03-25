@@ -14,7 +14,7 @@ export interface SessionMetaRow {
     last_input_tokens: number;
     times_execute_threshold_reached: number;
     compartment_in_progress: number;
-    system_prompt_hash: number;
+    system_prompt_hash: string;
 }
 
 export const META_COLUMNS: Record<string, string> = {
@@ -50,7 +50,7 @@ export function isSessionMetaRow(row: unknown): row is SessionMetaRow {
         typeof r.last_input_tokens === "number" &&
         typeof r.times_execute_threshold_reached === "number" &&
         typeof r.compartment_in_progress === "number" &&
-        typeof r.system_prompt_hash === "number"
+        typeof r.system_prompt_hash === "string"
     );
 }
 
@@ -68,7 +68,7 @@ export function getDefaultSessionMeta(sessionId: string): SessionMeta {
         lastInputTokens: 0,
         timesExecuteThresholdReached: 0,
         compartmentInProgress: false,
-        systemPromptHash: 0,
+        systemPromptHash: "",
     };
 }
 
@@ -89,7 +89,7 @@ export function ensureSessionMetaRow(db: Database, sessionId: string): void {
         defaults.lastInputTokens,
         defaults.timesExecuteThresholdReached,
         defaults.compartmentInProgress ? 1 : 0,
-        defaults.systemPromptHash,
+        defaults.systemPromptHash ?? "",
     );
 }
 

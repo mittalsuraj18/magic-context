@@ -35,6 +35,20 @@ function resolveEmbeddingConfig(config?: EmbeddingConfig): EmbeddingConfig {
     return { provider: "off" };
 }
 
+function resolveModelId(config: EmbeddingConfig): string {
+    if (config.provider === "off") {
+        return "off";
+    }
+
+    if (config.provider === "openai-compatible") {
+        const endpoint = config.endpoint.trim();
+        const model = config.model.trim();
+        return `openai-compat:${endpoint}:${model}`;
+    }
+
+    return config.model.trim() || DEFAULT_LOCAL_EMBEDDING_MODEL;
+}
+
 function createProvider(config: EmbeddingConfig): EmbeddingProvider | null {
     if (config.provider === "off") {
         return null;
@@ -62,10 +76,9 @@ function getOrCreateProvider(): EmbeddingProvider | null {
 
 export function initializeEmbedding(config: EmbeddingConfig): void {
     const nextConfig = resolveEmbeddingConfig(config);
-    const nextModelId = createProvider(nextConfig)?.modelId ?? "off";
+    const nextModelId = resolveModelId(nextConfig);
     const previousProvider = provider;
-    const previousModelId =
-        previousProvider?.modelId ?? createProvider(embeddingConfig)?.modelId ?? "off";
+    const previousModelId = previousProvider?.modelId ?? resolveModelId(embeddingConfig);
 
     if (previousModelId === nextModelId) {
         embeddingConfig = nextConfig;
@@ -108,10 +121,6 @@ export async function embedText(text: string): Promise<Float32Array | null> {
     return currentProvider.embed(text);
 }
 
-export async function embed(text: string): Promise<Float32Array | null> {
-    return embedText(text);
-}
-
 export async function embedBatch(texts: string[]): Promise<(Float32Array | null)[]> {
     if (texts.length === 0) {
         return [];
@@ -134,10 +143,6 @@ export function getEmbeddingModelId(): string {
 }
 
 export { cosineSimilarity };
-
-export function isEmbeddingModelLoaded(): boolean {
-    return provider?.isLoaded() ?? false;
-}
 
 export async function disposeEmbeddingModel(): Promise<void> {
     const currentProvider = provider;

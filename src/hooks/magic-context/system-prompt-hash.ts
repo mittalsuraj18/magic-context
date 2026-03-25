@@ -50,7 +50,7 @@ export function createSystemPromptHashHandler(deps: {
         const systemContent = output.system.join("\n");
         if (systemContent.length === 0) return;
 
-        const currentHash = Number(Bun.hash(systemContent));
+        const currentHash = String(Bun.hash(systemContent));
 
         let sessionMeta: import("../../features/magic-context/types").SessionMeta | undefined;
         try {
@@ -61,14 +61,14 @@ export function createSystemPromptHashHandler(deps: {
         }
 
         const previousHash = sessionMeta.systemPromptHash;
-        if (previousHash !== 0 && previousHash !== currentHash) {
+        if (previousHash !== "" && previousHash !== "0" && previousHash !== currentHash) {
             sessionLog(
                 sessionId,
                 `system prompt hash changed: ${previousHash} → ${currentHash} (len=${systemContent.length}), triggering flush`,
             );
             deps.flushedSessions.add(sessionId);
             deps.lastHeuristicsTurnId.delete(sessionId);
-        } else if (previousHash === 0) {
+        } else if (previousHash === "" || previousHash === "0") {
             sessionLog(
                 sessionId,
                 `system prompt hash initialized: ${currentHash} (len=${systemContent.length})`,

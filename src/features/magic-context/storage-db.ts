@@ -157,7 +157,7 @@ export function initializeDatabase(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_pending_ops_session ON pending_ops(session_id);
     CREATE INDEX IF NOT EXISTS idx_pending_ops_session_tag_id ON pending_ops(session_id, tag_id);
     CREATE INDEX IF NOT EXISTS idx_source_contents_session ON source_contents(session_id);
-    CREATE INDEX IF NOT EXISTS idx_session_meta_session ON session_meta(session_id);
+    
     CREATE TABLE IF NOT EXISTS recomp_compartments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL,
@@ -200,7 +200,7 @@ export function initializeDatabase(db: Database): void {
     ensureColumn(db, "session_meta", "sticky_turn_reminder_message_id", "TEXT DEFAULT ''");
     ensureColumn(db, "session_meta", "times_execute_threshold_reached", "INTEGER DEFAULT 0");
     ensureColumn(db, "session_meta", "compartment_in_progress", "INTEGER DEFAULT 0");
-    ensureColumn(db, "session_meta", "system_prompt_hash", "INTEGER DEFAULT 0");
+    ensureColumn(db, "session_meta", "system_prompt_hash", "TEXT DEFAULT ''");
     ensureColumn(db, "compartments", "start_message_id", "TEXT DEFAULT ''");
     ensureColumn(db, "compartments", "end_message_id", "TEXT DEFAULT ''");
     ensureColumn(db, "memory_embeddings", "model_id", "TEXT");

@@ -33,6 +33,7 @@ export class OpenAICompatibleEmbeddingProvider implements EmbeddingProvider {
     }
 
     async initialize(): Promise<boolean> {
+        if (this.initialized) return true;
         if (!this.endpoint || !this.model) {
             log(
                 "[magic-context] openai-compatible embedding provider is missing endpoint or model",
