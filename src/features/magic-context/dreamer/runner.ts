@@ -9,10 +9,13 @@ import { getErrorMessage } from "../../../shared/error-message";
 import { log } from "../../../shared/logger";
 import { extractLatestAssistantText } from "../../../shared/assistant-message-extractor";
 import { acquireLease, getLeaseHolder, releaseLease, renewLease } from "./lease";
-import { clearStaleEntries, dequeueNext, removeDreamEntry } from "./queue";
+import { clearStaleEntries, dequeueNext, removeDreamEntry, resetDreamEntry } from "./queue";
 import { getDreamState, setDreamState } from "./storage-dream-state";
 import { buildDreamTaskPrompt, DREAMER_SYSTEM_PROMPT } from "./task-prompts";
 
+// Intentional: keyed by project identity (e.g. "git:<sha>"), not filesystem path.
+// Multiple checkouts of the same repo overwrite each other; the last-active checkout wins.
+// Acceptable for v1 since multi-checkout dreaming is an edge case.
 const dreamProjectDirectories = new Map<string, string>();
 
 export function registerDreamProjectDirectory(projectPath: string, directory: string): void {
@@ -231,6 +234,8 @@ export async function runDream(args: {
     }
 
     result.finishedAt = Date.now();
+    // Store per-project dream time (for multi-project scheduling) and global fallback
+    setDreamState(args.db, `last_dream_at:${args.projectPath}`, String(result.finishedAt));
     setDreamState(args.db, "last_dream_at", String(result.finishedAt));
     const totalDuration = ((result.finishedAt - startedAt) / 1000).toFixed(1);
     const succeeded = result.tasks.filter((t) => !t.error).length;
@@ -260,17 +265,28 @@ export async function processDreamQueue(args: {
         `[dreamer] dequeued project ${entry.projectPath} (dir=${projectDirectory}), starting dream run`,
     );
 
-    try {
-        return await runDream({
-            db: args.db,
-            client: args.client,
-            projectPath: projectDirectory,
-            tasks: args.tasks,
-            taskTimeoutMinutes: args.taskTimeoutMinutes,
-            maxRuntimeMinutes: args.maxRuntimeMinutes,
-            sessionDirectory: projectDirectory,
-        });
-    } finally {
+    const result = await runDream({
+        db: args.db,
+        client: args.client,
+        projectPath: projectDirectory,
+        tasks: args.tasks,
+        taskTimeoutMinutes: args.taskTimeoutMinutes,
+        maxRuntimeMinutes: args.maxRuntimeMinutes,
+        sessionDirectory: projectDirectory,
+    });
+
+    // Only remove queue entry if the dream actually ran (lease acquired).
+    // If lease acquisition failed, the entry stays so it can be retried.
+    const leaseError = result.tasks.find((t) => t.name === "lease" && t.error);
+    if (leaseError) {
+        log(
+            `[dreamer] lease acquisition failed for ${entry.projectPath} — keeping queue entry for retry`,
+        );
+        // Reset started_at so it can be dequeued again
+        resetDreamEntry(args.db, entry.id);
+    } else {
         removeDreamEntry(args.db, entry.id);
     }
+
+    return result;
 }

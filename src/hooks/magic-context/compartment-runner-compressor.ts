@@ -145,6 +145,26 @@ export async function runCompressionPassIfNeeded(deps: CompressorDeps): Promise<
             return false;
         }
 
+        // Validate internal contiguity: no gaps or overlaps between compressed compartments
+        for (let i = 1; i < compressed.length; i++) {
+            const prev = compressed[i - 1];
+            const curr = compressed[i];
+            if (curr.startMessage <= prev.endMessage) {
+                sessionLog(
+                    sessionId,
+                    `compressor: overlap at compartment ${i}: prev ends ${prev.endMessage}, curr starts ${curr.startMessage}, aborting`,
+                );
+                return false;
+            }
+            if (curr.startMessage > prev.endMessage + 1) {
+                sessionLog(
+                    sessionId,
+                    `compressor: gap at compartment ${i}: prev ends ${prev.endMessage}, curr starts ${curr.startMessage}, aborting`,
+                );
+                return false;
+            }
+        }
+
         // Persist: replace compartments only, keep facts as-is
         replaceAllCompartmentState(
             db,

@@ -40,21 +40,35 @@ export function isInScheduleWindow(schedule: string, now: Date = new Date()): bo
     return currentMinutes >= window.startMinutes || currentMinutes < window.endMinutes;
 }
 
-/** Find projects that have session activity since their last dream. Scopes by project_path in session_meta. */
+/** Find projects that have memory updates since their per-project last dream time. */
 export function findProjectsNeedingDream(db: Database): string[] {
-    const lastDreamAtStr = getDreamState(db, "last_dream_at");
-    const lastDreamAt = lastDreamAtStr ? Number(lastDreamAtStr) || 0 : 0;
-
-    // Find distinct project paths from memories that have been updated since last dream
-    const rows = db
-        .query<{ project_path: string }, [number]>(
-            `SELECT DISTINCT project_path FROM memories
-             WHERE status = 'active' AND updated_at > ?
-             ORDER BY project_path`,
+    // Get all active project paths
+    const projectRows = db
+        .query<{ project_path: string }, []>(
+            `SELECT DISTINCT project_path FROM memories WHERE status = 'active' ORDER BY project_path`,
         )
-        .all(lastDreamAt);
+        .all();
 
-    return rows.map((row) => row.project_path);
+    const projects: string[] = [];
+    for (const row of projectRows) {
+        const lastDreamAtStr = getDreamState(db, `last_dream_at:${row.project_path}`);
+        // Fall back to global key for migration from old single-key format
+        const fallbackStr = !lastDreamAtStr ? getDreamState(db, "last_dream_at") : null;
+        const lastDreamAt = Number(lastDreamAtStr ?? fallbackStr ?? "0") || 0;
+
+        const updated = db
+            .query<{ cnt: number }, [string, number]>(
+                `SELECT COUNT(*) as cnt FROM memories
+                 WHERE project_path = ? AND status = 'active' AND updated_at > ?`,
+            )
+            .get(row.project_path, lastDreamAt);
+
+        if (updated && updated.cnt > 0) {
+            projects.push(row.project_path);
+        }
+    }
+
+    return projects;
 }
 
 /**

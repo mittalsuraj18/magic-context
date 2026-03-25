@@ -93,6 +93,11 @@ export function removeDreamEntry(db: Database, id: number): void {
     db.prepare("DELETE FROM dream_queue WHERE id = ?").run(id);
 }
 
+/** Reset a dequeued entry so it can be retried (e.g., after lease failure). */
+export function resetDreamEntry(db: Database, id: number): void {
+    db.prepare("UPDATE dream_queue SET started_at = NULL WHERE id = ?").run(id);
+}
+
 /** Clear stale started entries (stuck for more than maxAgeMs). */
 export function clearStaleEntries(db: Database, maxAgeMs: number): number {
     const cutoff = Date.now() - maxAgeMs;

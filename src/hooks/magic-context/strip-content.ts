@@ -134,6 +134,7 @@ export function stripDroppedPlaceholderMessages(messages: MessageLike[]): number
                 if (trimmed.length === 0) continue;
                 const allSegmentsDropped = trimmed
                     .split(/(?=\[dropped §)/)
+                    .filter((s) => s.trim().length > 0)
                     .every((segment) => DROPPED_PLACEHOLDER_PATTERN.test(segment.trim()));
                 if (!allSegmentsDropped) {
                     hasNonDroppedContent = true;
@@ -149,6 +150,7 @@ export function stripDroppedPlaceholderMessages(messages: MessageLike[]): number
                 if (trimmed.length === 0) continue;
                 const allSegmentsDropped = trimmed
                     .split(/(?=\[dropped §)/)
+                    .filter((s) => s.trim().length > 0)
                     .every((segment) => DROPPED_PLACEHOLDER_PATTERN.test(segment.trim()));
                 if (!allSegmentsDropped) {
                     hasNonDroppedContent = true;

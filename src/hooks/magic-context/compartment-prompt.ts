@@ -1,3 +1,5 @@
+import { escapeXmlAttr, escapeXmlContent } from "../../features/magic-context/compartment-storage";
+
 export const COMPARTMENT_AGENT_SYSTEM_PROMPT = `You condense long AI coding sessions into two outputs:
 
 1. compartments: completed logical work units
@@ -132,9 +134,9 @@ export function buildCompressorPrompt(
     lines.push("");
     for (const c of compartments) {
         lines.push(
-            `<compartment start="${c.startMessage}" end="${c.endMessage}" title="${c.title}">`,
+            `<compartment start="${c.startMessage}" end="${c.endMessage}" title="${escapeXmlAttr(c.title)}">`,
         );
-        lines.push(c.content);
+        lines.push(escapeXmlContent(c.content));
         lines.push("</compartment>");
         lines.push("");
     }

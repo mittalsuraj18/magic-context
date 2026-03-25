@@ -374,7 +374,7 @@ export function getRecompStaging(db: Database, sessionId: string): RecompStaging
         .all(sessionId)
         .filter(isRecompFactRow);
 
-    const maxPass = Math.max(...compartmentRows.map((r) => r.pass_number));
+    const maxPass = compartmentRows.reduce((m, r) => Math.max(m, r.pass_number), 0);
     const lastEnd = compartmentRows[compartmentRows.length - 1]?.end_message ?? 0;
 
     return {
@@ -473,7 +473,8 @@ function isRecompCompartmentRow(row: unknown): row is RecompCompartmentRow {
         typeof candidate.end_message_id === "string" &&
         typeof candidate.title === "string" &&
         typeof candidate.content === "string" &&
-        typeof candidate.pass_number === "number"
+        typeof candidate.pass_number === "number" &&
+        typeof candidate.created_at === "number"
     );
 }
 

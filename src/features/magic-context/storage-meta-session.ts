@@ -37,12 +37,14 @@ export function updateSessionMeta(
         const value = updates[key as keyof SessionMeta];
         if (value === undefined) continue;
 
-        setClauses.push(`${column} = ?`);
         if (value === null) {
+            setClauses.push(`${column} = ?`);
             values.push("");
         } else if (BOOLEAN_META_KEYS.has(key)) {
+            setClauses.push(`${column} = ?`);
             values.push(value ? 1 : 0);
         } else if (typeof value === "string" || typeof value === "number") {
+            setClauses.push(`${column} = ?`);
             values.push(value);
         }
     }

@@ -150,7 +150,9 @@ export function initializeDatabase(db: Database): void {
       last_input_tokens INTEGER DEFAULT 0,
       times_execute_threshold_reached INTEGER DEFAULT 0,
       compartment_in_progress INTEGER DEFAULT 0,
-      system_prompt_hash INTEGER DEFAULT 0
+      system_prompt_hash TEXT DEFAULT '',
+      memory_block_cache TEXT DEFAULT '',
+      memory_block_count INTEGER DEFAULT 0
     );
 
     CREATE INDEX IF NOT EXISTS idx_tags_session_tag_number ON tags(session_id, tag_number);
