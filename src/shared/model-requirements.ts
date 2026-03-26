@@ -5,43 +5,46 @@ import { SIDEKICK_AGENT } from "../agents/sidekick";
 /**
  * Provider-agnostic fallback chain entry.
  * Each entry specifies a model and the providers to try in priority order.
- * Modeled after oh-my-opencode's FallbackEntry pattern.
+ * Follows oh-my-opencode's FallbackEntry pattern — `opencode` acts as a
+ * catch-all proxy provider and is listed last in most entries.
  */
-export interface FallbackEntry {
-    model: string;
+export type FallbackEntry = {
     providers: string[];
+    model: string;
     variant?: string;
-}
+};
 
-export interface AgentModelRequirement {
-    /** Provider-agnostic fallback chain — tried in order, each provider per model */
+export type AgentModelRequirement = {
     fallbackChain: FallbackEntry[];
-}
+};
 
-// Historian: quality matters, single long prompt — prefer request-based pricing (Copilot) first
+// Historian: quality matters, single long prompt.
+// Copilot first (request-based pricing, ideal for single-prompt background work).
 const HISTORIAN_FALLBACK_CHAIN: FallbackEntry[] = [
-    { model: "claude-sonnet-4-6", providers: ["github-copilot", "anthropic"] },
-    { model: "minimax-m2.7", providers: ["opencode-go"] },
-    { model: "glm-5", providers: ["zai-coding-plan"] },
-    { model: "gpt-5.4", providers: ["openai"] },
-    { model: "gemini-3.1-pro", providers: ["google"] },
+    { providers: ["github-copilot", "anthropic", "opencode"], model: "claude-sonnet-4-6" },
+    { providers: ["opencode-go"], model: "minimax-m2.7" },
+    { providers: ["zai-coding-plan", "opencode"], model: "glm-5" },
+    { providers: ["openai", "github-copilot", "opencode"], model: "gpt-5.4" },
+    { providers: ["google", "github-copilot", "opencode"], model: "gemini-3.1-pro" },
 ];
 
-// Dreamer: runs overnight during idle, can be slow — prefer request-based pricing first
+// Dreamer: runs overnight during idle time, can be slow.
+// Copilot first (request-based pricing). Local models also work well here.
 const DREAMER_FALLBACK_CHAIN: FallbackEntry[] = [
-    { model: "claude-sonnet-4-6", providers: ["github-copilot", "anthropic"] },
-    { model: "gemini-3-flash", providers: ["google"] },
-    { model: "glm-5", providers: ["zai-coding-plan"] },
-    { model: "minimax-m2.7", providers: ["opencode-go"] },
-    { model: "gpt-5.4-mini", providers: ["openai"] },
+    { providers: ["github-copilot", "anthropic", "opencode"], model: "claude-sonnet-4-6" },
+    { providers: ["google", "github-copilot", "opencode"], model: "gemini-3-flash" },
+    { providers: ["zai-coding-plan", "opencode"], model: "glm-5" },
+    { providers: ["opencode-go"], model: "minimax-m2.7" },
+    { providers: ["openai", "github-copilot", "opencode"], model: "gpt-5.4-mini" },
 ];
 
-// Sidekick: speed is critical — fast inference providers first, no Copilot (low token count)
+// Sidekick: speed is critical — fast inference providers first.
+// No Copilot preference (low token count, request-based pricing doesn't help).
 const SIDEKICK_FALLBACK_CHAIN: FallbackEntry[] = [
-    { model: "qwen-3-235b-a22b-instruct-2507", providers: ["cerebras"] },
-    { model: "gpt-5-nano", providers: ["opencode"] },
-    { model: "gemini-3-flash", providers: ["google"] },
-    { model: "gpt-5.4-mini", providers: ["openai"] },
+    { providers: ["cerebras"], model: "qwen-3-235b-a22b-instruct-2507" },
+    { providers: ["opencode"], model: "gpt-5-nano" },
+    { providers: ["google", "github-copilot", "opencode"], model: "gemini-3-flash" },
+    { providers: ["openai", "github-copilot", "opencode"], model: "gpt-5.4-mini" },
 ];
 
 export const AGENT_MODEL_REQUIREMENTS: Record<string, AgentModelRequirement> = {
