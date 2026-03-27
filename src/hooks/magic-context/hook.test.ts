@@ -438,7 +438,7 @@ describe("magic-context hook", () => {
                 query: { directory: "/tmp" },
                 body: expect.objectContaining({
                     agent: "sidekick",
-                    system: expect.stringContaining('ctx_memory(action="search"'),
+                    system: expect.stringContaining('ctx_search(query="'),
                     parts: [
                         {
                             type: "text",

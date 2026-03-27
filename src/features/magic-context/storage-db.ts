@@ -131,6 +131,21 @@ export function initializeDatabase(db: Database): void {
       tokenize='porter unicode61'
     );
 
+    CREATE VIRTUAL TABLE IF NOT EXISTS message_history_fts USING fts5(
+      session_id UNINDEXED,
+      message_ordinal UNINDEXED,
+      message_id UNINDEXED,
+      role,
+      content,
+      tokenize='porter unicode61'
+    );
+
+    CREATE TABLE IF NOT EXISTS message_history_index (
+      session_id TEXT PRIMARY KEY,
+      last_indexed_ordinal INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL
+    );
+
     CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
       INSERT INTO memories_fts(rowid, content, category) VALUES (new.id, new.content, new.category);
     END;
@@ -203,6 +218,7 @@ export function initializeDatabase(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_memories_project_status_category ON memories(project_path, status, category);
     CREATE INDEX IF NOT EXISTS idx_memories_project_status_expires ON memories(project_path, status, expires_at);
     CREATE INDEX IF NOT EXISTS idx_memories_project_category_hash ON memories(project_path, category, normalized_hash);
+    CREATE INDEX IF NOT EXISTS idx_message_history_index_updated_at ON message_history_index(updated_at);
   `);
 
     ensureColumn(db, "session_meta", "last_nudge_band", "TEXT DEFAULT ''");

@@ -71,7 +71,7 @@ describe("runSidekick", () => {
                 query: { directory: "/repo/project" },
                 body: {
                     agent: "sidekick",
-                    system: expect.stringContaining('ctx_memory(action="search"'),
+                    system: expect.stringContaining('ctx_search(query="'),
                     parts: [
                         { type: "text", text: "Implement sidekick and keep Bun workflow rules." },
                     ],

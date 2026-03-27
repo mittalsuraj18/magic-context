@@ -5,6 +5,7 @@ export {
     getCompartments,
     getSessionFacts,
     replaceAllCompartmentState,
+    type SessionFact,
 } from "./compartment-storage";
 export {
     type ContextDatabase,

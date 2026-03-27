@@ -16,8 +16,10 @@ import {
 import { type RawMessage, readRawSessionMessagesFromDb } from "./read-session-raw";
 import { isFilePart, isTextPart, isToolPartWithOutput } from "./tag-part-guards";
 
+export { extractTexts, hasMeaningfulUserText } from "./read-session-formatting";
+
 /** Strip system-reminder blocks and OMO markers from user text for chunk compaction. */
-function cleanUserText(text: string): string {
+export function cleanUserText(text: string): string {
     return removeSystemReminders(text).replace(OMO_INTERNAL_INITIATOR_MARKER, "").trim();
 }
 
@@ -35,7 +37,7 @@ export interface SessionChunk {
     commitClusterCount: number;
 }
 
-function readRawSessionMessages(sessionId: string): RawMessage[] {
+export function readRawSessionMessages(sessionId: string): RawMessage[] {
     return withReadOnlySessionDb((db) => readRawSessionMessagesFromDb(db, sessionId));
 }
 

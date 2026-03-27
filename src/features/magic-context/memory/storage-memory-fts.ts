@@ -29,7 +29,7 @@ function getSearchStatement(db: Database): PreparedStatement {
  * This wraps each whitespace-delimited token in double quotes so special
  * characters are treated as literal content rather than query syntax.
  */
-function sanitizeFtsQuery(query: string): string {
+export function sanitizeFtsQuery(query: string): string {
     const tokens = query.split(/\s+/).filter((token) => token.length > 0);
     if (tokens.length === 0) return "";
 

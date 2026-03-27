@@ -19,7 +19,8 @@ Use \`ctx_reduce\` to manage context size. It supports one operation:
 - \`drop\`: Remove entirely (best for tool outputs you already acted on).
 Syntax: "3-5", "1,2,9", or "1-5,8,12-15". Last ${protectedTags} tags are protected.
 Use \`ctx_note\` for deferred intentions — things to tackle later, not right now. NOT for task tracking (use todos). Notes survive context compression and you'll be reminded at natural work boundaries (after commits, historian runs, todo completion).
-Use \`ctx_memory\` to manage cross-session project memories. Write new memories, delete stale ones, or search stored memories by category. Memories persist across sessions and are automatically injected into new sessions.
+Use \`ctx_memory\` to manage cross-session project memories. Write new memories or delete stale ones. Memories persist across sessions and are automatically injected into new sessions.
+Use \`ctx_search\` to search across project memories, session facts, and conversation history from one query.
 Use \`ctx_expand\` to decompress a compartment range to see the original conversation transcript. Use \`start\`/\`end\` from \`<compartment start=N end=M>\` attributes. Returns the compacted U:/A: transcript for that message range, capped at ~15K tokens.
 NEVER drop large ranges blindly (e.g., "1-50"). Review each tag before deciding.
 NEVER drop user messages — they are short and will be summarized by compartmentalization automatically. Dropping them loses context the historian needs.
@@ -29,7 +30,8 @@ Before your turn finishes, consider using \`ctx_reduce\` to drop large tool outp
 /** Intro when ctx_reduce is disabled — no drop guidance, no ctx_reduce references. */
 const BASE_INTRO_NO_REDUCE = `Messages and tool outputs are tagged with §N§ identifiers (e.g., §1§, §42§).
 Use \`ctx_note\` for deferred intentions — things to tackle later, not right now. NOT for task tracking (use todos). Notes survive context compression and you'll be reminded at natural work boundaries (after commits, historian runs, todo completion).
-Use \`ctx_memory\` to manage cross-session project memories. Write new memories, delete stale ones, or search stored memories by category. Memories persist across sessions and are automatically injected into new sessions.
+Use \`ctx_memory\` to manage cross-session project memories. Write new memories or delete stale ones. Memories persist across sessions and are automatically injected into new sessions.
+Use \`ctx_search\` to search across project memories, session facts, and conversation history from one query.
 Use \`ctx_expand\` to decompress a compartment range to see the original conversation transcript. Use \`start\`/\`end\` from \`<compartment start=N end=M>\` attributes. Returns the compacted U:/A: transcript for that message range, capped at ~15K tokens.`;
 
 const SISYPHUS_SECTION = `

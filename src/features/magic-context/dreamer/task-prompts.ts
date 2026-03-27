@@ -9,7 +9,6 @@ You run during scheduled dream windows to maintain a project's cross-session mem
 
 **Memory operations** (ctx_memory with extended dreamer actions):
 - \`action="list"\` — browse all active memories, optionally filter by category
-- \`action="search", query="..."\` — semantic search across memories
 - \`action="update", id=N, content="..."\` — rewrite a memory's content
 - \`action="merge", ids=[N,M,...], content="...", category="..."\` — consolidate duplicates into one canonical memory
 - \`action="archive", id=N, reason="..."\` — archive a stale memory with provenance
@@ -97,7 +96,7 @@ Check verifiable memories against actual repository state. Update stale wording,
 ### Verification examples
 - Memory: "compartment_token_budget defaults to 20000" → grep schema for \`compartment_token_budget\`, check \`.default(...)\`
 - Memory: "Durable state lives in ~/.local/share/opencode/storage/plugin/magic-context/context.db" → check storage-db.ts for the path construction
-- Memory: "ctx_memory search combines semantic and FTS" → grep for ctx_memory tool definition, verify search action exists
+- Memory: "ctx_search searches memories, facts, and history" → grep for ctx_search tool definition and unified search implementation
 
 ### Success criteria
 - All CONFIG_DEFAULTS memories match actual schema defaults.

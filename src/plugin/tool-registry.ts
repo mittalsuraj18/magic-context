@@ -18,6 +18,7 @@ import { createCtxExpandTools } from "../tools/ctx-expand";
 import { createCtxMemoryTools } from "../tools/ctx-memory";
 import { createCtxNoteTools } from "../tools/ctx-note";
 import { createCtxReduceTools } from "../tools/ctx-reduce";
+import { createCtxSearchTools } from "../tools/ctx-search";
 import { normalizeToolArgSchemas } from "./normalize-tool-arg-schemas";
 import type { PluginContext } from "./types";
 
@@ -79,6 +80,12 @@ export function createToolRegistry(args: {
             : {}),
         ...createCtxExpandTools(),
         ...createCtxNoteTools({ db }),
+        ...createCtxSearchTools({
+            db,
+            projectPath,
+            memoryEnabled,
+            embeddingEnabled: embeddingConfig.provider !== "off",
+        }),
         ...(memoryEnabled
             ? {
                   ...createCtxMemoryTools({
@@ -86,7 +93,7 @@ export function createToolRegistry(args: {
                       projectPath,
                       memoryEnabled: true,
                       embeddingEnabled: embeddingConfig.provider !== "off",
-                      allowedActions: ["write", "delete", "search"],
+                      allowedActions: ["write", "delete"],
                   }),
               }
             : {}),
