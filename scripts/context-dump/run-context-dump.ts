@@ -195,6 +195,8 @@ export async function runContextDump(sessionId: string): Promise<ContextDumpResu
 			historianWriteTimes,
 			previousBustTime,
 		)
+		//console.dir(entry);
+
 		previousBustTime = entry.time_completed
 		return [{ entry, probableCause }]
 	})

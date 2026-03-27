@@ -22,9 +22,10 @@ const SEMANTIC_WEIGHT = 0.7;
 const FTS_WEIGHT = 0.3;
 const SINGLE_SOURCE_PENALTY = 0.8;
 const RESULT_PREVIEW_LIMIT = 220;
-const MEMORY_SOURCE_PRIORITY = 0;
-const FACT_SOURCE_PRIORITY = 1;
-const MESSAGE_SOURCE_PRIORITY = 2;
+/** Source boost multipliers for unified ranking — higher-signal sources get a mild score boost. */
+const MEMORY_SOURCE_BOOST = 1.3;
+const FACT_SOURCE_BOOST = 1.15;
+const MESSAGE_SOURCE_BOOST = 1.0;
 
 interface MessageSearchRow {
     messageOrdinal?: number | string;
@@ -378,25 +379,23 @@ function searchMessages(args: {
         .filter((result): result is MessageSearchResult => result !== null);
 }
 
-function getSourcePriority(result: UnifiedSearchResult): number {
+function getSourceBoost(result: UnifiedSearchResult): number {
     switch (result.source) {
         case "memory":
-            return MEMORY_SOURCE_PRIORITY;
+            return MEMORY_SOURCE_BOOST;
         case "fact":
-            return FACT_SOURCE_PRIORITY;
+            return FACT_SOURCE_BOOST;
         case "message":
-            return MESSAGE_SOURCE_PRIORITY;
+            return MESSAGE_SOURCE_BOOST;
     }
 }
 
 function compareUnifiedResults(left: UnifiedSearchResult, right: UnifiedSearchResult): number {
-    const priorityDiff = getSourcePriority(left) - getSourcePriority(right);
-    if (priorityDiff !== 0) {
-        return priorityDiff;
-    }
+    const leftEffective = left.score * getSourceBoost(left);
+    const rightEffective = right.score * getSourceBoost(right);
 
-    if (right.score !== left.score) {
-        return right.score - left.score;
+    if (rightEffective !== leftEffective) {
+        return rightEffective - leftEffective;
     }
 
     if (left.source === "memory" && right.source === "memory") {

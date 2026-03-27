@@ -98,13 +98,14 @@ export function buildDumpStats(originalMessages: DumpMessage[], transformedMessa
 		.map((msg, index) => {
 			const { id } = messageIdentity(msg, index)
 			const tokens = msg.info.tokens as Record<string, unknown>
+			const error = msg.info.error;
 			const cache = isRecord(tokens.cache) ? tokens.cache : {}
 			const total = typeof tokens.total === "number" ? tokens.total : 0
 			const input = typeof tokens.input === "number" ? tokens.input : 0
 			const output = typeof tokens.output === "number" ? tokens.output : 0
 			const cacheRead = typeof cache.read === "number" ? cache.read : 0
 			const cacheWrite = typeof cache.write === "number" ? cache.write : 0
-			const cacheBust = prevCacheRead > 0 && cacheRead < prevCacheRead
+			const cacheBust = prevCacheRead > 0 && cacheRead < prevCacheRead && (!error || error.name != "MessageAbortedError")
 			prevCacheRead = cacheRead
 
 			const time = isRecord(msg.info.time) ? msg.info.time : {}
