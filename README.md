@@ -81,7 +81,7 @@ And overnight, a **dreamer** agent consolidates, verifies, and improves memories
 
 ## What Your Agent Gets
 
-Magic Context injects structured context automatically and gives the agent four tools.
+Magic Context injects structured context automatically and gives the agent five tools.
 
 ### `ctx_reduce` — Shed weight
 
@@ -120,9 +120,18 @@ Architecture decisions, naming conventions, user preferences — anything that s
 
 ```
 ctx_memory(action="write", category="ARCHITECTURE_DECISIONS", content="Event sourcing for orders.")
-ctx_memory(action="search", query="authentication approach")
 ctx_memory(action="delete", id=42)
 ```
+
+### `ctx_search` — Unified search
+
+Search across all data layers with a single query — project memories, session facts, and raw conversation history. Results are ranked by source (memories first, then facts, then message hits).
+
+```
+ctx_search(query="authentication approach")
+```
+
+Message results include ordinal numbers the agent can pass to `ctx_expand` to retrieve the surrounding conversation context.
 
 ### Automatic context injection
 
@@ -170,7 +179,7 @@ As context usage grows, Magic Context sends rolling reminders suggesting the age
 
 After each historian run, qualifying facts are promoted to the persistent memory store. On every subsequent turn, active memories are injected in `<session-history>`. New sessions inherit all project memories from previous sessions.
 
-Memories are searchable via `ctx_memory(action="search", ...)` using semantic embeddings (local by default) with full-text search as fallback.
+Memories are searchable via `ctx_search` alongside session facts and raw conversation history, using semantic embeddings (local by default) with full-text search as fallback.
 
 ### Dreamer
 
@@ -230,6 +239,8 @@ All durable states live in a local SQLite database. If the database can't be ope
 | `memory_embeddings` | Embedding vectors for semantic search |
 | `dream_state` | Dreamer lease locking and task progress |
 | `dream_queue` | Queued projects awaiting dream processing |
+| `message_history_fts` | FTS5 index of user/assistant message text for `ctx_search` |
+| `message_history_index` | Tracks last indexed ordinal per session for incremental FTS population |
 | `recomp_compartments` | Staging for `/ctx-recomp` partial progress |
 | `recomp_facts` | Staging for `/ctx-recomp` partial progress |
 

@@ -38,6 +38,7 @@ Higher-tier models with longer cache windows benefit from a longer TTL. Setting 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enabled` | `boolean` | `false` | Master toggle. |
+| `ctx_reduce_enabled` | `boolean` | `true` | When `false`, hides `ctx_reduce` tool, disables all nudges/reminders, and strips reduction guidance from prompts. Heuristic cleanup, compartments, memory, and search still work. Useful for testing whether automatic cleanup alone is sufficient. |
 | `cache_ttl` | `string` or `object` | `"5m"` | Time after a response before applying pending ops. String or per-model map. |
 | `protected_tags` | `number` (1–20) | `20` | Last N active tags immune from immediate dropping. |
 | `nudge_interval_tokens` | `number` | `10000` | Minimum token growth between rolling nudges. |
@@ -141,7 +142,7 @@ Configures the dreamer agent — both the model it uses and the maintenance task
 
 ### How scheduling works
 
-The schedule check piggybacks on `message.updated` events with an hourly debounce. When the current time falls inside the configured window:
+An independent 15-minute timer checks the schedule regardless of user activity, so overnight dreaming triggers even when the user isn't chatting. When the current time falls inside the configured window:
 
 1. The scheduler scans the memory store for projects with activity since the last dream.
 2. Eligible projects are enqueued into a SQLite-backed dream queue.
