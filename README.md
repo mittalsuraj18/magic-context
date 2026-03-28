@@ -45,16 +45,19 @@ Your agent should never stop working to manage its own context. Magic Context is
 
 Run the interactive setup wizard — it detects your models, configures everything, and handles compatibility:
 
+**macOS / Linux:**
 ```bash
-# macOS / Linux
 curl -fsSL https://raw.githubusercontent.com/cortexkit/opencode-magic-context/master/scripts/install.sh | bash
+```
 
-# Windows (PowerShell)
+**Windows (PowerShell):**
+```powershell
 irm https://raw.githubusercontent.com/cortexkit/opencode-magic-context/master/scripts/install.ps1 | iex
+```
 
-# Or run directly (any OS)
+**Or run directly (any OS):**
+```bash
 bunx @cortexkit/opencode-magic-context setup
-npx @cortexkit/opencode-magic-context setup
 ```
 
 The wizard will:
