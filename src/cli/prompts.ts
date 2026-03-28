@@ -1,6 +1,20 @@
+import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 
-const rl = createInterface({ input: process.stdin, output: process.stdout });
+function getInput(): NodeJS.ReadableStream {
+    // When piped (curl | bash), stdin is consumed by the pipe.
+    // Open /dev/tty directly to read from the actual terminal.
+    if (!process.stdin.isTTY) {
+        try {
+            return createReadStream("/dev/tty");
+        } catch {
+            // Windows or no TTY available — fall back to stdin
+        }
+    }
+    return process.stdin;
+}
+
+const rl = createInterface({ input: getInput(), output: process.stdout });
 
 function ask(question: string): Promise<string> {
     return new Promise((resolve) => {
