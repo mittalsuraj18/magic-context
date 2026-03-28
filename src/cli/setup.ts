@@ -32,10 +32,6 @@ function readJsonc(path: string): Record<string, unknown> {
     }
 }
 
-function writeJsonc(path: string, data: Record<string, unknown>): void {
-    writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`);
-}
-
 // ─── Config Manipulators ──────────────────────────────────
 
 function addPluginToOpenCodeConfig(configPath: string, format: "json" | "jsonc" | "none"): void {
