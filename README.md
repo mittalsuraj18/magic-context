@@ -25,6 +25,20 @@
 
 ---
 
+## What is Magic Context?
+
+Context windows fill up, old messages get dropped, and the agent loses track of decisions it made twenty minutes ago. Magic Context is an OpenCode plugin that fixes this:
+
+**1.** Transparent context compaction via a background historian — all operations are **cache-aware** and deferred to avoid wasting cached prefixes.
+
+**2.** Cross-session project memory — architecture decisions, constraints, and preferences persist across conversations.
+
+**3.** Overnight dreamer agent that consolidates, deduplicates, and promotes memories into canonical facts, plus maintains codebase documentation.
+
+**4.** On-demand sidekick that augments prompts with relevant project context.
+
+---
+
 ## Get Started
 
 ### Quick Setup (Recommended)
@@ -97,20 +111,6 @@ If you use [oh-my-opencode](https://github.com/code-yeongyu/oh-my-opencode), dis
 ```
 
 The setup wizard handles this automatically if it detects an oh-my-opencode config.
-
----
-
-## What is Magic Context?
-
-AI coding agents forget everything the moment a conversation gets long enough. Context windows fill up, old messages get dropped, and the agent loses track of decisions it made twenty minutes ago.
-
-Magic Context fixes this with a background historian — a separate, lightweight model that compresses older conversation into structured summaries and durable facts while the main agent keeps working. The agent never stops to summarize its own history. It never notices the rewriting happening beneath it.
-
-Every mutation is **cache-aware**. Drops and rewrites are queued until the provider's cached prefix expires, so you're not paying to throw away work that's already cached.
-
-Across sessions, architecture decisions, constraints, and preferences persist in a **cross-session memory** system. A new conversation starts with everything the previous one learned, without replaying old transcripts.
-
-And overnight, a **dreamer** agent consolidates, verifies, and improves memories — checking them against the actual codebase and merging duplicates into clean canonical facts.
 
 ---
 
