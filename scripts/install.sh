@@ -16,11 +16,11 @@ main() {
   if command -v bun &>/dev/null; then
     echo "  → Using bun"
     echo ""
-    bunx "$PACKAGE" setup
+    bunx "$PACKAGE" setup </dev/tty
   elif command -v npx &>/dev/null; then
     echo "  → Using npx"
     echo ""
-    npx -y "$PACKAGE" setup
+    npx -y "$PACKAGE" setup </dev/tty
   else
     echo "  ✗ Neither bun nor npx found."
     echo ""
