@@ -133,6 +133,15 @@ export function prepareCompartmentInjection(
             if (cutoffIndex >= 0) {
                 const remaining = messages.slice(cutoffIndex + 1);
                 messages.splice(0, messages.length, ...remaining);
+            } else {
+                // Anchored message no longer in array (dropped/compacted).
+                // Invalidate cache to avoid injecting history with stale boundaries.
+                sessionLog(
+                    sessionId,
+                    `compartment injection: cached boundary ${cached.compartmentEndMessageId} not found in messages, invalidating cache`,
+                );
+                injectionCache.delete(sessionId);
+                return null;
             }
         }
         return cached;

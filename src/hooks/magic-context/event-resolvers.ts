@@ -59,22 +59,28 @@ export function resolveExecuteThreshold(
     modelKey: string | undefined,
     fallback: number,
 ): number {
+    const MAX_EXECUTE_THRESHOLD = 80;
+    let resolved: number;
+
     if (typeof config === "number") {
-        return config;
-    }
-
-    if (modelKey && typeof config[modelKey] === "number") {
-        return config[modelKey];
-    }
-
-    if (modelKey) {
+        resolved = config;
+    } else if (modelKey && typeof config[modelKey] === "number") {
+        resolved = config[modelKey];
+    } else if (modelKey) {
         const bareModelId = modelKey.split("/").slice(1).join("/");
         if (bareModelId && typeof config[bareModelId] === "number") {
-            return config[bareModelId];
+            resolved = config[bareModelId];
+        } else {
+            resolved = config.default ?? fallback;
         }
+    } else {
+        resolved = config.default ?? fallback;
     }
 
-    return config.default ?? fallback;
+    // Cap at 80% — higher values create a gap between execute_threshold and
+    // forceMaterialization (85%) where shouldRunHeuristics fires on defer
+    // passes without isCacheBustingPass, causing unguarded cache busts.
+    return Math.min(resolved, MAX_EXECUTE_THRESHOLD);
 }
 
 export function resolveModelKey(
