@@ -413,6 +413,30 @@ body {
   opacity: 0.5;
 }
 
+/* ── Error boundary ──────────────────────────────────── */
+.error-boundary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+  gap: 12px;
+  color: var(--text-secondary);
+}
+.error-boundary h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.error-boundary p {
+  font-size: 13px;
+  font-family: var(--mono-font);
+  color: var(--error-text, #ef4444);
+  max-width: 500px;
+  word-break: break-word;
+}
+
 /* ── Inline cache bar ────────────────────────────────── */
 .cache-bar {
   height: 4px;

@@ -641,17 +641,33 @@ pub fn delete_memory(conn: &Connection, memory_id: i64) -> Result<(), rusqlite::
 
 pub fn get_sessions(conn: &Connection) -> Result<Vec<SessionSummary>, rusqlite::Error> {
     let sql = "
+        WITH comp_stats AS (
+            SELECT session_id,
+                   COUNT(*) AS cnt,
+                   MIN(start_message) AS first_start,
+                   MAX(end_message) AS last_end
+            FROM compartments GROUP BY session_id
+        ),
+        fact_stats AS (
+            SELECT session_id, COUNT(*) AS cnt FROM session_facts GROUP BY session_id
+        ),
+        note_stats AS (
+            SELECT session_id, COUNT(*) AS cnt FROM session_notes GROUP BY session_id
+        )
         SELECT
             sm.session_id,
-            COALESCE((SELECT COUNT(*) FROM compartments c WHERE c.session_id = sm.session_id), 0) as compartment_count,
-            COALESCE((SELECT COUNT(*) FROM session_facts sf WHERE sf.session_id = sm.session_id), 0) as fact_count,
-            COALESCE((SELECT COUNT(*) FROM session_notes sn WHERE sn.session_id = sm.session_id), 0) as note_count,
-            (SELECT MIN(start_message) FROM compartments c WHERE c.session_id = sm.session_id) as first_start,
-            (SELECT MAX(end_message) FROM compartments c WHERE c.session_id = sm.session_id) as last_end,
+            COALESCE(cs.cnt, 0),
+            COALESCE(fs.cnt, 0),
+            COALESCE(ns.cnt, 0),
+            cs.first_start,
+            cs.last_end,
             sm.last_response_time,
             sm.last_context_percentage,
             sm.is_subagent
         FROM session_meta sm
+        LEFT JOIN comp_stats cs ON cs.session_id = sm.session_id
+        LEFT JOIN fact_stats fs ON fs.session_id = sm.session_id
+        LEFT JOIN note_stats ns ON ns.session_id = sm.session_id
         ORDER BY sm.last_response_time DESC NULLS LAST
     ";
     let mut stmt = conn.prepare(sql)?;

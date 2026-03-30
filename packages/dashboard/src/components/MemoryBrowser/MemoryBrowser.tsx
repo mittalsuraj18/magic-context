@@ -48,23 +48,40 @@ export default function MemoryBrowser() {
     return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
   };
 
+  const [error, setError] = createSignal<string | null>(null);
+
   const handleStatusChange = async (memoryId: number, newStatus: string) => {
-    await updateMemoryStatus(memoryId, newStatus);
-    refetchMemories();
-    refetchStats();
-    setSelectedMemory(null);
+    try {
+      setError(null);
+      await updateMemoryStatus(memoryId, newStatus);
+      refetchMemories();
+      refetchStats();
+      setSelectedMemory(null);
+    } catch (e: unknown) {
+      setError(`Failed to update status: ${e instanceof Error ? e.message : String(e)}`);
+    }
   };
 
   const handleContentChange = async (memoryId: number, content: string) => {
-    await updateMemoryContent(memoryId, content);
-    refetchMemories();
+    try {
+      setError(null);
+      await updateMemoryContent(memoryId, content);
+      refetchMemories();
+    } catch (e: unknown) {
+      setError(`Failed to update content: ${e instanceof Error ? e.message : String(e)}`);
+    }
   };
 
   const handleDelete = async (memoryId: number) => {
-    await deleteMemory(memoryId);
-    refetchMemories();
-    refetchStats();
-    setSelectedMemory(null);
+    try {
+      setError(null);
+      await deleteMemory(memoryId);
+      refetchMemories();
+      refetchStats();
+      setSelectedMemory(null);
+    } catch (e: unknown) {
+      setError(`Failed to delete memory: ${e instanceof Error ? e.message : String(e)}`);
+    }
   };
 
   const statusPillClass = (status: string) => {
@@ -94,6 +111,15 @@ export default function MemoryBrowser() {
 
   return (
     <>
+      {/* Error toast */}
+      <Show when={error()}>
+        <div style={{ padding: "8px 20px" }}>
+          <div style={{ background: "var(--error-bg, #3a1c1c)", border: "1px solid var(--error-border, #6b2c2c)", "border-radius": "var(--radius-md)", padding: "8px 12px", "font-size": "12px", color: "var(--error-text, #ef4444)", display: "flex", "justify-content": "space-between", "align-items": "center" }}>
+            <span>{error()}</span>
+            <button class="btn sm" onClick={() => setError(null)} style={{ "min-width": "auto", padding: "2px 8px" }}>✕</button>
+          </div>
+        </div>
+      </Show>
       <div class="section-header">
         <h1 class="section-title">Memories</h1>
         <div class="section-actions">
