@@ -51,9 +51,9 @@ const FIELD_DEFS: FieldDef[] = [
   { key: "history_budget_percentage", label: "History Budget %", type: "number", description: "Fraction of context limit reserved for rendered history (0.0–1.0).", section: "Historian" },
   { key: "historian_timeout_ms", label: "Historian Timeout (ms)", type: "number", description: "Max wait time for a historian run before timeout.", section: "Historian" },
   // Embedding
-  { key: "embedding.provider", label: "Embedding Provider", type: "select", options: ["local", "openai-compatible", "off"], description: "Which embedding provider to use for memory search.", section: "Embedding" },
-  { key: "embedding.model", label: "Embedding Model", type: "string", description: "Model name for embeddings. Defaults to Xenova/all-MiniLM-L6-v2 for local.", section: "Embedding" },
-  { key: "embedding.endpoint", label: "Embedding Endpoint", type: "string", description: "API endpoint for openai-compatible provider.", section: "Embedding" },
+  { key: "embedding.provider", label: "Embedding Provider", type: "select", options: ["local", "openai-compatible", "off"], description: "Which embedding provider to use for memory search.", section: "Memory" },
+  { key: "embedding.model", label: "Embedding Model", type: "string", description: "Model name for embeddings. Defaults to Xenova/all-MiniLM-L6-v2 for local.", section: "Memory" },
+  { key: "embedding.endpoint", label: "Embedding Endpoint", type: "string", description: "API endpoint for openai-compatible provider.", section: "Memory" },
   // Memory
   { key: "memory.enabled", label: "Memory Enabled", type: "boolean", description: "Enable cross-session project memory.", section: "Memory" },
   { key: "memory.injection_budget_tokens", label: "Injection Budget (tokens)", type: "number", description: "Max tokens for memory injection into session history.", section: "Memory" },
@@ -93,7 +93,7 @@ const SECTION_ICONS: Record<string, string> = {
   "Thresholds": "⚡",
   "Tags & Cleanup": "🏷️",
   "Historian": "📜",
-  "Embedding": "🔗",
+
   "Memory": "🧠",
 };
 
@@ -284,14 +284,25 @@ function ConfigForm(props: {
         <div class="config-grid">
           <For each={sections()}>
             {([sectionName, fields]) => {
-              const isFullWidth = sectionName === "Embedding" || sectionName === "Historian";
+              const isFullWidth = sectionName === "Historian" || sectionName === "Memory";
               return (
                 <div class={`config-card ${isFullWidth ? "full-width" : ""}`}>
                   <div class="config-card-header">
                     <span class="config-card-icon">{SECTION_ICONS[sectionName] || "📋"}</span>
                     <span class="config-card-title">{sectionName}</span>
                   </div>
-                  {sectionName === "Historian" ? (
+                  {sectionName === "Memory" ? (
+                    <div class="config-card-two-col">
+                      {/* Left: Memory settings */}
+                      <div class="config-card-content">
+                        <For each={fields.filter((f) => f.key.startsWith("memory."))}>{renderField}</For>
+                      </div>
+                      {/* Right: Embedding settings */}
+                      <div class="config-card-content">
+                        <For each={fields.filter((f) => f.key.startsWith("embedding."))}>{renderField}</For>
+                      </div>
+                    </div>
+                  ) : sectionName === "Historian" ? (
                     <div class="config-card-two-col">
                       {/* Left: Model + Fallbacks */}
                       <div class="config-card-content">
