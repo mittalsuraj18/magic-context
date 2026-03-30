@@ -1123,8 +1123,10 @@ select.config-input {
 .fsel-dropdown {
   position: absolute;
   top: calc(100% + 4px);
-  left: 0;
-  min-width: 100%;
+  right: 0;
+  min-width: max(100%, 180px);
+  width: max-content;
+  max-width: 360px;
   z-index: 50;
   background: var(--bg-panel);
   border: 1px solid var(--border-light);
