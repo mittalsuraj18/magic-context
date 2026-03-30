@@ -26,6 +26,10 @@ tmp/
 local-ignore/
 .planning/
 
+# Dashboard (not yet released — keep out of plugin package)
+packages/
+.bg-shell/
+
 # Keep only the final animation; iteration folders stay local
 docs/animation[0-9]*/
 
