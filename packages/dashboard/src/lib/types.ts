@@ -164,6 +164,15 @@ export interface ConfigFile {
   source: string;
 }
 
+export interface ProjectConfigEntry {
+  project_name: string;
+  worktree: string;
+  config_path: string;
+  exists: boolean;
+  alt_config_path: string | null;
+  alt_exists: boolean;
+}
+
 export interface DbHealth {
   exists: boolean;
   path: string;

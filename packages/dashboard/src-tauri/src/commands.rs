@@ -198,6 +198,17 @@ pub fn save_config(source: String, content: String) -> Result<(), String> {
     config::write_config(&path, &content)
 }
 
+#[tauri::command]
+pub fn get_project_configs() -> Vec<config::ProjectConfigEntry> {
+    config::discover_project_configs()
+}
+
+#[tauri::command]
+pub fn save_project_config(project_path: String, content: String) -> Result<(), String> {
+    let path = config::resolve_project_config_path(&project_path);
+    config::write_config(&path, &content)
+}
+
 // ── Health commands ─────────────────────────────────────────
 
 #[tauri::command]

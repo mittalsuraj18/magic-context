@@ -52,3 +52,85 @@ pub fn write_config(path: &PathBuf, content: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to write config: {}", e))?;
     Ok(())
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ProjectConfigEntry {
+    pub project_name: String,
+    pub worktree: String,
+    pub config_path: String,
+    pub exists: bool,
+    pub alt_config_path: Option<String>,
+    pub alt_exists: bool,
+}
+
+/// Discover projects with magic-context config files by scanning OpenCode project worktrees.
+pub fn discover_project_configs() -> Vec<ProjectConfigEntry> {
+    let opencode_db = {
+        let data_dir = if cfg!(target_os = "windows") {
+            match dirs::data_dir() { Some(d) => d, None => return vec![] }
+        } else {
+            std::env::var("XDG_DATA_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| {
+                    dirs::home_dir().unwrap_or_default().join(".local").join("share")
+                })
+        };
+        data_dir.join("opencode").join("opencode.db")
+    };
+
+    if !opencode_db.exists() { return vec![]; }
+
+    let conn = match rusqlite::Connection::open_with_flags(
+        &opencode_db,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+
+    let mut stmt = match conn.prepare("SELECT name, worktree FROM project") {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+
+    let rows: Vec<(String, String)> = match stmt.query_map([], |row| {
+        Ok((
+            row.get::<_, Option<String>>(0)?.unwrap_or_default(),
+            row.get::<_, String>(1)?,
+        ))
+    }) {
+        Ok(mapped) => mapped.flatten().collect(),
+        Err(_) => return vec![],
+    };
+
+    let mut entries = Vec::new();
+    for (name, worktree) in rows {
+        let root_config = PathBuf::from(&worktree).join("magic-context.jsonc");
+        let alt_config = PathBuf::from(&worktree).join(".opencode").join("magic-context.jsonc");
+        let root_exists = root_config.exists();
+        let alt_exists = alt_config.exists();
+
+        // Only include projects that have at least one config file
+        if root_exists || alt_exists {
+            let display_name = if name.is_empty() {
+                std::path::Path::new(&worktree)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| worktree.clone())
+            } else {
+                name
+            };
+
+            entries.push(ProjectConfigEntry {
+                project_name: display_name,
+                worktree: worktree.clone(),
+                config_path: root_config.to_string_lossy().to_string(),
+                exists: root_exists,
+                alt_config_path: Some(alt_config.to_string_lossy().to_string()),
+                alt_exists,
+            });
+        }
+    }
+
+    entries
+}

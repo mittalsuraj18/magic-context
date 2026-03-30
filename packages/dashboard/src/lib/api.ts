@@ -147,6 +147,17 @@ export async function getDbHealth(): Promise<DbHealth> {
   return invoke("get_db_health");
 }
 
+export async function getProjectConfigs(): Promise<import("./types").ProjectConfigEntry[]> {
+  return invoke("get_project_configs");
+}
+
+export async function saveProjectConfig(
+  projectPath: string,
+  content: string,
+): Promise<void> {
+  return invoke("save_project_config", { projectPath, content });
+}
+
 // ── Utilities ───────────────────────────────────────────────
 
 export function formatTimestamp(ts: number): string {
@@ -165,6 +176,13 @@ export function formatRelativeTime(ts: number): string {
   if (hours > 0) return `${hours}h ago`;
   if (minutes > 0) return `${minutes}m ago`;
   return `${seconds}s ago`;
+}
+
+export function formatDateTime(ts: number): string {
+  const d = new Date(ts);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  const month = d.toLocaleString("en", { month: "short" });
+  return `${month} ${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export function formatBytes(bytes: number): string {

@@ -55,9 +55,10 @@ fn main() {
             commands::get_cache_events,
             commands::get_session_cache_stats,
             // Config
-            commands::get_config,
-            commands::save_config,
-            // Health
+commands::get_config,
+commands::save_config,
+commands::get_project_configs,
+commands::save_project_config,            // Health
             commands::get_db_health,
         ])
         .setup(|app| {

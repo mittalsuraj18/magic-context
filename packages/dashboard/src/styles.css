@@ -634,3 +634,94 @@ body {
 .code-editor:focus {
   border-color: var(--accent);
 }
+
+/* Config form */
+.config-pre {
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  font-family: var(--mono-font);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-y: auto;
+  max-height: calc(100vh - 260px);
+}
+
+.config-section {
+  margin-bottom: 20px;
+}
+
+.config-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0 4px;
+}
+
+.config-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.config-field-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.config-field-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.config-field-key {
+  font-family: var(--mono-font);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.config-field-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.config-input {
+  width: 100%;
+  max-width: 320px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: var(--mono-font);
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.config-input:focus {
+  border-color: var(--accent);
+}
+
+select.config-input {
+  cursor: pointer;
+}
+
+.config-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.config-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+}

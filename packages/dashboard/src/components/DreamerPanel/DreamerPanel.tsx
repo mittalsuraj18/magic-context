@@ -1,6 +1,6 @@
 import { createResource, For, Show } from "solid-js";
 import type { DreamQueueEntry, DreamStateEntry } from "../../lib/types";
-import { getDreamQueue, getDreamState, enqueueDream, formatRelativeTime } from "../../lib/api";
+import { getDreamQueue, getDreamState, enqueueDream, formatRelativeTime, formatDateTime } from "../../lib/api";
 
 export default function DreamerPanel() {
   const [queue, { refetch: refetchQueue }] = createResource(getDreamQueue);
@@ -49,7 +49,12 @@ export default function DreamerPanel() {
           <Show when={leaseState().lastRunTime}>
             <div class="stat-item">
               <span class="stat-label">Last Run</span>
-              <span class="stat-value">{leaseState().lastRunTime}</span>
+              <span class="stat-value">{(() => {
+                const v = leaseState().lastRunTime;
+                if (!v) return "—";
+                const n = Number(v);
+                return !Number.isNaN(n) && n > 1e12 ? formatDateTime(n) : v;
+              })()}</span>
             </div>
           </Show>
           <div class="stat-item">
@@ -92,12 +97,25 @@ export default function DreamerPanel() {
             <table class="kv-table">
               <tbody>
                 <For each={state() ?? []}>
-                  {(entry) => (
-                    <tr>
-                      <td>{entry.key}</td>
-                      <td>{entry.value}</td>
-                    </tr>
-                  )}
+                  {(entry) => {
+                    const displayValue = () => {
+                      const v = entry.value;
+                      // Format epoch-ms timestamps (last_dream_at:*, lease timestamps, etc.)
+                      if (entry.key.startsWith("last_dream_at") || entry.key.includes("time")) {
+                        const n = Number(v);
+                        if (!Number.isNaN(n) && n > 1e12) {
+                          return `${formatDateTime(n)} (${formatRelativeTime(n)})`;
+                        }
+                      }
+                      return v;
+                    };
+                    return (
+                      <tr>
+                        <td>{entry.key}</td>
+                        <td>{displayValue()}</td>
+                      </tr>
+                    );
+                  }}
                 </For>
               </tbody>
             </table>
