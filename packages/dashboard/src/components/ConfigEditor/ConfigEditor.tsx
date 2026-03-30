@@ -85,6 +85,31 @@ function setNestedValue(obj: Record<string, unknown>, path: string, value: unkno
   return clone;
 }
 
+// ── Section icons ───────────────────────────────────────────
+
+const SECTION_ICONS: Record<string, string> = {
+  "General": "⚙️",
+  "Thresholds": "⚡",
+  "Tags & Cleanup": "🏷️",
+  "Historian": "📜",
+  "Embedding": "🔗",
+  "Memory": "🧠",
+};
+
+// Fields that should use range sliders (percentage or threshold values)
+const RANGE_SLIDER_FIELDS = new Set([
+  "execute_threshold_percentage",
+  "history_budget_percentage",
+  "nudge_interval_tokens",
+  "protected_tags",
+  "auto_drop_tool_age",
+  "clear_reasoning_age",
+  "iteration_nudge_threshold",
+  "compartment_token_budget",
+  "historian_timeout_ms",
+  "memory.injection_budget_tokens",
+]);
+
 // ── ConfigForm component ────────────────────────────────────
 
 function ConfigForm(props: {
@@ -135,18 +160,49 @@ function ConfigForm(props: {
     }
   };
 
+  // Range slider helpers
+  const getRangeConfig = (fieldKey: string) => {
+    switch (fieldKey) {
+      case "execute_threshold_percentage":
+        return { min: 35, max: 80, step: 1, suffix: "%" };
+      case "history_budget_percentage":
+        return { min: 0.05, max: 0.5, step: 0.01, suffix: "" };
+      case "nudge_interval_tokens":
+        return { min: 1000, max: 50000, step: 1000, suffix: " tokens" };
+      case "protected_tags":
+        return { min: 0, max: 50, step: 1, suffix: "" };
+      case "auto_drop_tool_age":
+      case "clear_reasoning_age":
+        return { min: 1, max: 100, step: 1, suffix: "" };
+      case "iteration_nudge_threshold":
+        return { min: 1, max: 20, step: 1, suffix: "" };
+      case "compartment_token_budget":
+        return { min: 5000, max: 100000, step: 5000, suffix: " tokens" };
+      case "historian_timeout_ms":
+        return { min: 5000, max: 60000, step: 5000, suffix: " ms" };
+      case "memory.injection_budget_tokens":
+        return { min: 500, max: 20000, step: 500, suffix: " tokens" };
+      default:
+        return { min: 0, max: 100, step: 1, suffix: "" };
+    }
+  };
+
   return (
     <div>
-      <div style={{ display: "flex", "justify-content": "space-between", "align-items": "center", "margin-bottom": "12px" }}>
+      {/* Sticky Action Bar */}
+      <div class="config-action-bar">
         <div class="tab-pills" style={{ margin: "0" }}>
           <button class={`tab-pill ${!showRaw() ? "active" : ""}`} onClick={() => setShowRaw(false)}>Form</button>
           <button class={`tab-pill ${showRaw() ? "active" : ""}`} onClick={() => { setShowRaw(true); setRawEdit(null); }}>Raw JSONC</button>
         </div>
-        <Show when={props.saveStatus}>
-          <span style={{ "font-size": "12px", color: props.saveStatus!.startsWith("✓") ? "var(--green)" : "var(--red)" }}>
-            {props.saveStatus}
-          </span>
-        </Show>
+        <div style={{ display: "flex", "align-items": "center", gap: "12px" }}>
+          <Show when={props.saveStatus}>
+            <span style={{ "font-size": "12px", color: props.saveStatus!.startsWith("✓") ? "var(--green)" : "var(--red)" }}>
+              {props.saveStatus}
+            </span>
+          </Show>
+          <button class="btn primary sm" onClick={handleFormSave}>Save Changes</button>
+        </div>
       </div>
 
       <Show when={!showRaw()} fallback={
@@ -172,78 +228,112 @@ function ConfigForm(props: {
           </Show>
         </div>
       }>
-        <div class="config-form">
+        <div class="config-grid">
           <For each={sections()}>
-            {([sectionName, fields]) => (
-              <div class="config-section">
-                <div class="category-header" style={{ "margin-top": "0" }}>{sectionName}</div>
-                <div class="config-fields">
-                  <For each={fields}>
-                    {(field) => {
-                      const value = () => {
-                        const formVal = getNestedValue(formData(), field.key);
-                        return formVal !== undefined ? formVal : getNestedValue(parsed(), field.key);
-                      };
+            {([sectionName, fields]) => {
+              const isFullWidth = sectionName === "Embedding";
+              return (
+                <div class={`config-card ${isFullWidth ? "full-width" : ""}`}>
+                  <div class="config-card-header">
+                    <span class="config-card-icon">{SECTION_ICONS[sectionName] || "📋"}</span>
+                    <span class="config-card-title">{sectionName}</span>
+                  </div>
+                  <div class="config-card-content">
+                    <For each={fields}>
+                      {(field) => {
+                        const value = () => {
+                          const formVal = getNestedValue(formData(), field.key);
+                          return formVal !== undefined ? formVal : getNestedValue(parsed(), field.key);
+                        };
 
-                      return (
-                        <div class="config-field">
-                          <div class="config-field-header">
-                            <label class="config-field-label">{field.label}</label>
-                            <span class="config-field-key">{field.key}</span>
-                          </div>
-                          <span class="config-field-desc">{field.description}</span>
+                        // For fields that can be objects (e.g. { default: 65, "model-key": 80 }),
+                        // extract the scalar value for display/editing
+                        const scalarValue = () => {
+                          const v = value();
+                          if (v != null && typeof v === "object" && !Array.isArray(v)) {
+                            const obj = v as Record<string, unknown>;
+                            return obj.default !== undefined ? obj.default : undefined;
+                          }
+                          return v;
+                        };
+                        const isObjectValue = () => {
+                          const v = value();
+                          return v != null && typeof v === "object" && !Array.isArray(v);
+                        };
+                        const isRangeSlider = field.type === "number" && RANGE_SLIDER_FIELDS.has(field.key) && !isObjectValue();
 
-                          {field.type === "boolean" ? (
-                            <label class="config-toggle">
+                        return (
+                          <div class="config-field">
+                            <div class="config-field-header">
+                              <label class="config-field-label">{field.label}</label>
+                              <span class="config-field-key">{field.key}</span>
+                            </div>
+                            <span class="config-field-desc">{field.description}</span>
+
+                            {field.type === "boolean" ? (
+                              <label class="toggle-switch">
+                                <input
+                                  type="checkbox"
+                                  checked={value() as boolean ?? true}
+                                  onChange={(e) => handleFieldChange(field.key, e.currentTarget.checked)}
+                                />
+                                <span class="toggle-slider" />
+                                <span class="toggle-label">{value() ? "Enabled" : "Disabled"}</span>
+                              </label>
+                            ) : field.type === "select" ? (
+                              <select
+                                class="config-input"
+                                value={String(value() ?? "")}
+                                onChange={(e) => handleFieldChange(field.key, e.currentTarget.value)}
+                              >
+                                <For each={field.options ?? []}>
+                                  {(opt) => <option value={opt}>{opt}</option>}
+                                </For>
+                              </select>
+                            ) : isRangeSlider ? (
+                              <div class="range-slider-container">
+                                <input
+                                  class="range-slider"
+                                  type="range"
+                                  min={getRangeConfig(field.key).min}
+                                  max={getRangeConfig(field.key).max}
+                                  step={getRangeConfig(field.key).step}
+                                  value={scalarValue() != null ? Number(scalarValue()) : getRangeConfig(field.key).min}
+                                  onInput={(e) => handleFieldChange(field.key, Number(e.currentTarget.value))}
+                                />
+                                <span class="range-slider-value">
+                                  {scalarValue() != null ? Number(scalarValue()) : getRangeConfig(field.key).min}{getRangeConfig(field.key).suffix}
+                                </span>
+                              </div>
+                            ) : field.type === "number" ? (
                               <input
-                                type="checkbox"
-                                checked={value() as boolean ?? true}
-                                onChange={(e) => handleFieldChange(field.key, e.currentTarget.checked)}
+                                class="config-input"
+                                type="number"
+                                value={value() != null ? String(value()) : ""}
+                                placeholder="default"
+                                onInput={(e) => {
+                                  const v = e.currentTarget.value;
+                                  handleFieldChange(field.key, v ? Number(v) : undefined);
+                                }}
                               />
-                              <span>{value() ? "Enabled" : "Disabled"}</span>
-                            </label>
-                          ) : field.type === "select" ? (
-                            <select
-                              class="config-input"
-                              value={String(value() ?? "")}
-                              onChange={(e) => handleFieldChange(field.key, e.currentTarget.value)}
-                            >
-                              <For each={field.options ?? []}>
-                                {(opt) => <option value={opt}>{opt}</option>}
-                              </For>
-                            </select>
-                          ) : field.type === "number" ? (
-                            <input
-                              class="config-input"
-                              type="number"
-                              value={value() != null ? String(value()) : ""}
-                              placeholder="default"
-                              onInput={(e) => {
-                                const v = e.currentTarget.value;
-                                handleFieldChange(field.key, v ? Number(v) : undefined);
-                              }}
-                            />
-                          ) : (
-                            <input
-                              class="config-input"
-                              type="text"
-                              value={typeof value() === "object" ? JSON.stringify(value()) : String(value() ?? "")}
-                              placeholder="default"
-                              onInput={(e) => handleFieldChange(field.key, e.currentTarget.value)}
-                            />
-                          )}
-                        </div>
-                      );
-                    }}
-                  </For>
+                            ) : (
+                              <input
+                                class="config-input"
+                                type="text"
+                                value={typeof value() === "object" ? JSON.stringify(value()) : String(value() ?? "")}
+                                placeholder="default"
+                                onInput={(e) => handleFieldChange(field.key, e.currentTarget.value)}
+                              />
+                            )}
+                          </div>
+                        );
+                      }}
+                    </For>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            }}
           </For>
-
-          <div style={{ "margin-top": "16px" }}>
-            <button class="btn primary sm" onClick={handleFormSave}>Save Changes</button>
-          </div>
         </div>
       </Show>
     </div>
