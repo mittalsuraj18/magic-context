@@ -50,10 +50,6 @@ const FIELD_DEFS: FieldDef[] = [
   { key: "compartment_token_budget", label: "Compartment Token Budget", type: "number", description: "Max tokens per historian chunk input.", section: "Historian" },
   { key: "history_budget_percentage", label: "History Budget %", type: "number", description: "Fraction of context limit reserved for rendered history (0.0–1.0).", section: "Historian" },
   { key: "historian_timeout_ms", label: "Historian Timeout (ms)", type: "number", description: "Max wait time for a historian run before timeout.", section: "Historian" },
-  // Embedding
-  { key: "embedding.provider", label: "Embedding Provider", type: "select", options: ["local", "openai-compatible", "off"], description: "Which embedding provider to use for memory search.", section: "Memory" },
-  { key: "embedding.model", label: "Embedding Model", type: "string", description: "Model name for embeddings. Defaults to Xenova/all-MiniLM-L6-v2 for local.", section: "Memory" },
-  { key: "embedding.endpoint", label: "Embedding Endpoint", type: "string", description: "API endpoint for openai-compatible provider.", section: "Memory" },
   // Memory
   { key: "memory.enabled", label: "Memory Enabled", type: "boolean", description: "Enable cross-session project memory.", section: "Memory" },
   { key: "memory.injection_budget_tokens", label: "Injection Budget (tokens)", type: "number", description: "Max tokens for memory injection into session history.", section: "Memory" },
@@ -121,6 +117,7 @@ function ConfigForm(props: {
   const [showRaw, setShowRaw] = createSignal(false);
   const [rawEdit, setRawEdit] = createSignal<string | null>(null);
   const [formData, setFormData] = createSignal<Record<string, unknown>>(parseJsonc(props.content));
+  const [embeddingTestResult, setEmbeddingTestResult] = createSignal<{ ok: boolean; message: string } | null>(null);
   const [models] = createResource(getAvailableModels);
 
   // Reset form data when content prop changes
@@ -291,19 +288,134 @@ function ConfigForm(props: {
                     <span class="config-card-icon">{SECTION_ICONS[sectionName] || "📋"}</span>
                     <span class="config-card-title">{sectionName}</span>
                   </div>
-                  {sectionName === "Memory" ? (
-                    <div class="config-card-two-col">
-                      {/* Left: Memory settings */}
-                      <div class="config-card-content">
-                        <For each={fields.filter((f) => f.key.startsWith("memory."))}>{renderField}</For>
+                  {sectionName === "Memory" ? (() => {
+                    const embeddingProvider = () => {
+                      const v = getNestedValue(formData(), "embedding.provider");
+                      return (v as string) || "local";
+                    };
+                    const isRemote = () => embeddingProvider() === "openai-compatible";
+                    return (
+                      <div class="config-card-two-col">
+                        {/* Left: Memory settings */}
+                        <div class="config-card-content">
+                          <For each={fields}>{renderField}</For>
+                        </div>
+                        {/* Right: Embedding settings */}
+                        <div class="config-card-content">
+                          {/* Provider */}
+                          <div class="config-field">
+                            <div class="config-field-header">
+                              <label class="config-field-label">Embedding Provider</label>
+                              <span class="config-field-key">embedding.provider</span>
+                            </div>
+                            <span class="config-field-desc">Provider for memory semantic search</span>
+                            <div style={{ display: "flex", gap: "6px" }}>
+                              <For each={["local", "openai-compatible", "off"] as const}>
+                                {(opt) => (
+                                  <button
+                                    class={`btn sm ${embeddingProvider() === opt ? "primary" : ""}`}
+                                    onClick={() => handleFieldChange("embedding.provider", opt)}
+                                    type="button"
+                                  >
+                                    {opt === "local" ? "Local" : opt === "openai-compatible" ? "OpenAI Compatible" : "Off"}
+                                  </button>
+                                )}
+                              </For>
+                            </div>
+                            <Show when={embeddingProvider() === "local"}>
+                              <span class="config-field-desc" style={{ "margin-top": "4px", color: "var(--text-muted)", "font-style": "italic" }}>
+                                Uses Xenova/all-MiniLM-L6-v2 locally — no configuration needed
+                              </span>
+                            </Show>
+                          </div>
+
+                          {/* Remote-only fields */}
+                          <Show when={isRemote()}>
+                            <div class="config-field">
+                              <div class="config-field-header">
+                                <label class="config-field-label">Model</label>
+                                <span class="config-field-key">embedding.model</span>
+                              </div>
+                              <span class="config-field-desc">Embedding model name (e.g., text-embedding-3-small)</span>
+                              <input
+                                class="config-input"
+                                type="text"
+                                value={String(getNestedValue(formData(), "embedding.model") ?? "")}
+                                placeholder="text-embedding-3-small"
+                                onInput={(e) => handleFieldChange("embedding.model", e.currentTarget.value || undefined)}
+                              />
+                            </div>
+
+                            <div class="config-field">
+                              <div class="config-field-header">
+                                <label class="config-field-label">Endpoint</label>
+                                <span class="config-field-key">embedding.endpoint</span>
+                              </div>
+                              <span class="config-field-desc">API endpoint URL</span>
+                              <input
+                                class="config-input"
+                                type="text"
+                                value={String(getNestedValue(formData(), "embedding.endpoint") ?? "")}
+                                placeholder="https://api.openai.com/v1"
+                                onInput={(e) => handleFieldChange("embedding.endpoint", e.currentTarget.value || undefined)}
+                              />
+                            </div>
+
+                            <div class="config-field">
+                              <div class="config-field-header">
+                                <label class="config-field-label">API Key</label>
+                                <span class="config-field-key">embedding.api_key</span>
+                              </div>
+                              <span class="config-field-desc">Authentication key for the embedding API</span>
+                              <input
+                                class="config-input"
+                                type="password"
+                                value={String(getNestedValue(formData(), "embedding.api_key") ?? "")}
+                                placeholder="sk-..."
+                                onInput={(e) => handleFieldChange("embedding.api_key", e.currentTarget.value || undefined)}
+                              />
+                            </div>
+
+                            <div>
+                              <button
+                                class="btn sm"
+                                type="button"
+                                onClick={async () => {
+                                  const endpoint = String(getNestedValue(formData(), "embedding.endpoint") ?? "").trim();
+                                  const model = String(getNestedValue(formData(), "embedding.model") ?? "").trim();
+                                  const apiKey = String(getNestedValue(formData(), "embedding.api_key") ?? "").trim();
+                                  if (!endpoint || !model) {
+                                    setEmbeddingTestResult({ ok: false, message: "Endpoint and model are required" });
+                                    return;
+                                  }
+                                  setEmbeddingTestResult({ ok: false, message: "Testing..." });
+                                  try {
+                                    const { invoke } = await import("@tauri-apps/api/core");
+                                    const result = await invoke<string>("test_embedding_endpoint", { endpoint, model, apiKey: apiKey || null });
+                                    setEmbeddingTestResult({ ok: true, message: result });
+                                  } catch (e: any) {
+                                    setEmbeddingTestResult({ ok: false, message: String(e?.message || e) });
+                                  }
+                                }}
+                              >
+                                ⚡ Test Connection
+                              </button>
+                              <Show when={embeddingTestResult()}>
+                                <span style={{
+                                  "margin-left": "10px",
+                                  "font-size": "12px",
+                                  color: embeddingTestResult()!.ok ? "var(--green)" : "var(--red)"
+                                }}>
+                                  {embeddingTestResult()!.message}
+                                </span>
+                              </Show>
+                            </div>
+                          </Show>
+                        </div>
                       </div>
-                      {/* Right: Embedding settings */}
-                      <div class="config-card-content">
-                        <For each={fields.filter((f) => f.key.startsWith("embedding."))}>{renderField}</For>
-                      </div>
-                    </div>
-                  ) : sectionName === "Historian" ? (
-                    <div class="config-card-two-col">
+                    );
+                  })()
+                  : sectionName === "Historian" ? (                    <div class="config-card-two-col">
                       {/* Left: Model + Fallbacks */}
                       <div class="config-card-content">
                         <div class="config-field">

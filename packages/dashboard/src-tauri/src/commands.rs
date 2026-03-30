@@ -228,6 +228,50 @@ pub fn get_available_models() -> Vec<String> {
     }
 }
 
+// ── Embedding test ──────────────────────────────────────────
+
+#[tauri::command]
+pub async fn test_embedding_endpoint(
+    endpoint: String,
+    model: String,
+    api_key: Option<String>,
+) -> Result<String, String> {
+    let url = format!(
+        "{}/embeddings",
+        endpoint.trim_end_matches('/')
+    );
+
+    let body = serde_json::json!({
+        "model": model,
+        "input": "test connection"
+    });
+
+    let client = reqwest::Client::new();
+    let mut req = client.post(&url)
+        .header("Content-Type", "application/json")
+        .json(&body);
+
+    if let Some(key) = api_key.as_deref() {
+        if !key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", key));
+        }
+    }
+
+    match req.send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            if status.is_success() {
+                Ok(format!("✓ Connected ({})", status))
+            } else {
+                let body = resp.text().await.unwrap_or_default();
+                let preview = if body.len() > 120 { &body[..120] } else { &body };
+                Err(format!("{}: {}", status, preview))
+            }
+        }
+        Err(e) => Err(format!("Connection failed: {}", e)),
+    }
+}
+
 // ── Health commands ─────────────────────────────────────────
 
 #[tauri::command]

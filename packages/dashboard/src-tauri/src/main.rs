@@ -61,6 +61,7 @@ commands::get_project_configs,
 commands::save_project_config,
             // Models
             commands::get_available_models,
+                commands::test_embedding_endpoint,
             // Health
             commands::get_db_health,
         ])
