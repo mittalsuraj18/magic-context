@@ -49,7 +49,11 @@ function estimateProjectedPostDropPercentage(
     clearedReasoningThroughTag?: number,
 ): number | null {
     const activeTags = getTagsBySession(db, sessionId).filter((tag) => tag.status === "active");
-    const totalActiveBytes = activeTags.reduce((sum, tag) => sum + tag.byteSize, 0);
+    // Denominator must include both text/tool bytes and reasoning bytes to match the numerator
+    const totalActiveBytes = activeTags.reduce(
+        (sum, tag) => sum + tag.byteSize + tag.reasoningByteSize,
+        0,
+    );
     if (totalActiveBytes === 0) return null;
 
     let droppableBytes = 0;
@@ -96,7 +100,7 @@ function estimateProjectedPostDropPercentage(
 
     if (droppableBytes === 0) return null;
 
-    const dropRatio = droppableBytes / totalActiveBytes;
+    const dropRatio = Math.min(droppableBytes / totalActiveBytes, 1);
     return usage.percentage * (1 - dropRatio);
 }
 
