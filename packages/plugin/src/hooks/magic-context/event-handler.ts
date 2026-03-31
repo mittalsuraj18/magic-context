@@ -57,6 +57,7 @@ export interface EventHandlerDeps {
     onSessionCacheInvalidated?: (sessionId: string) => void;
     config: {
         protected_tags: number;
+        auto_drop_tool_age?: number;
         execute_threshold_percentage?: number | { default: number; [modelKey: string]: number };
         cache_ttl: CacheTtlConfig;
         modelContextLimitsCache?: Map<string, number>;
@@ -286,6 +287,9 @@ export function createEventHandler(deps: EventHandlerDeps) {
                                 modelKey,
                                 65,
                             ),
+                            undefined, // compartmentTokenBudget — use default
+                            deps.config.auto_drop_tool_age ?? 100,
+                            deps.config.protected_tags,
                         );
 
                         if (triggerResult.shouldFire) {

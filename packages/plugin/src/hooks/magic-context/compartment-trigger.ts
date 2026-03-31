@@ -43,20 +43,44 @@ function estimateProjectedPostDropPercentage(
     db: Database,
     sessionId: string,
     usage: ContextUsage,
+    autoDropToolAge?: number,
+    protectedTags?: number,
 ): number | null {
-    const pendingDrops = getPendingOps(db, sessionId).filter((op) => op.operation === "drop");
-    if (pendingDrops.length === 0) return null;
-
     const activeTags = getTagsBySession(db, sessionId).filter((tag) => tag.status === "active");
     const totalActiveBytes = activeTags.reduce((sum, tag) => sum + tag.byteSize, 0);
     if (totalActiveBytes === 0) return null;
 
-    const pendingDropTagIds = new Set(pendingDrops.map((op) => op.tagId));
-    const pendingDropBytes = activeTags
-        .filter((tag) => pendingDropTagIds.has(tag.tagNumber))
-        .reduce((sum, tag) => sum + tag.byteSize, 0);
+    let droppableBytes = 0;
 
-    const dropRatio = pendingDropBytes / totalActiveBytes;
+    // 1. Pending user-queued drops (from ctx_reduce)
+    const pendingDrops = getPendingOps(db, sessionId).filter((op) => op.operation === "drop");
+    if (pendingDrops.length > 0) {
+        const pendingDropTagIds = new Set(pendingDrops.map((op) => op.tagId));
+        droppableBytes += activeTags
+            .filter((tag) => pendingDropTagIds.has(tag.tagNumber))
+            .reduce((sum, tag) => sum + tag.byteSize, 0);
+    }
+
+    // 2. Heuristic auto-drop: old tool outputs outside protected tail
+    if (autoDropToolAge !== undefined && protectedTags !== undefined) {
+        const maxTag = activeTags.reduce((max, t) => Math.max(max, t.tagNumber), 0);
+        const toolAgeCutoff = maxTag - autoDropToolAge;
+        const protectedCutoff = maxTag - protectedTags;
+        const pendingDropTagIds = new Set(pendingDrops.map((op) => op.tagId));
+
+        for (const tag of activeTags) {
+            // Skip already counted pending drops
+            if (pendingDropTagIds.has(tag.tagNumber)) continue;
+            if (tag.tagNumber > protectedCutoff) continue;
+            if (tag.type === "tool" && tag.tagNumber <= toolAgeCutoff) {
+                droppableBytes += tag.byteSize;
+            }
+        }
+    }
+
+    if (droppableBytes === 0) return null;
+
+    const dropRatio = droppableBytes / totalActiveBytes;
     return usage.percentage * (1 - dropRatio);
 }
 
@@ -133,6 +157,8 @@ export function checkCompartmentTrigger(
     _previousPercentage: number,
     executeThresholdPercentage: number,
     compartmentTokenBudget: number = DEFAULT_COMPARTMENT_TOKEN_BUDGET,
+    autoDropToolAge?: number,
+    protectedTagCount?: number,
 ): CompartmentTriggerResult {
     if (sessionMeta.compartmentInProgress) {
         return { shouldFire: false };
@@ -143,7 +169,13 @@ export function checkCompartmentTrigger(
         return { shouldFire: false };
     }
 
-    const projectedPostDropPercentage = estimateProjectedPostDropPercentage(db, sessionId, usage);
+    const projectedPostDropPercentage = estimateProjectedPostDropPercentage(
+        db,
+        sessionId,
+        usage,
+        autoDropToolAge,
+        protectedTagCount,
+    );
     const relativePostDropTarget = executeThresholdPercentage * POST_DROP_TARGET_RATIO;
 
     // Force at 80% — only skip if drops alone bring usage well below the relative target
