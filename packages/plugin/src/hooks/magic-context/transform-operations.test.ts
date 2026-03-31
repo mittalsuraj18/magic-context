@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { closeDatabase, getTagById, openDatabase } from "../../features/magic-context/storage";
 import { createTagger } from "../../features/magic-context/tagger";
-import { clearOldReasoning, tagMessages } from "./transform-operations";
 import { byteSize } from "./tag-content-primitives";
+import { clearOldReasoning, tagMessages } from "./transform-operations";
 
 type TextPart = { type: "text"; text: string };
 type ToolPart = { type: "tool"; callID: string; state: { output: string } };
@@ -69,7 +69,9 @@ describe("tagMessages", () => {
                 },
                 {
                     info: { id: "m-tool", role: "tool" },
-                    parts: [{ type: "tool", callID: "call-1", state: { output: "command output" } }],
+                    parts: [
+                        { type: "tool", callID: "call-1", state: { output: "command output" } },
+                    ],
                 },
             ];
 

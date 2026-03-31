@@ -172,7 +172,8 @@ export function tagMessages(
                         contentId,
                         textOrdinal,
                     );
-                    const reasoningBytes = textOrdinal === 0 ? getReasoningByteSize(thinkingParts) : 0;
+                    const reasoningBytes =
+                        textOrdinal === 0 ? getReasoningByteSize(thinkingParts) : 0;
                     const tagId = tagger.assignTag(
                         sessionId,
                         contentId,

@@ -146,7 +146,14 @@ export function insertTag(
     tagNumber: number,
     reasoningByteSize: number = 0,
 ): number {
-    getInsertTagStatement(db).run(sessionId, messageId, type, byteSize, reasoningByteSize, tagNumber);
+    getInsertTagStatement(db).run(
+        sessionId,
+        messageId,
+        type,
+        byteSize,
+        reasoningByteSize,
+        tagNumber,
+    );
 
     return tagNumber;
 }
