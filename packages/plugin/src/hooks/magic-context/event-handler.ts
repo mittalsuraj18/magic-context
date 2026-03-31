@@ -1,7 +1,19 @@
 import type { createCompactionHandler } from "../../features/magic-context/compaction";
 import {
+    clearPersistedNoteNudge,
+    clearPersistedNudgePlacement,
+    clearPersistedStickyTurnReminder,
     clearSession,
+    deleteIndexedMessage,
+    deleteTagsByMessageId,
+    getMaxTagNumberBySession,
     getOrCreateSessionMeta,
+    getPersistedNoteNudge,
+    getPersistedNudgePlacement,
+    getPersistedReasoningWatermark,
+    getPersistedStickyTurnReminder,
+    removeStrippedPlaceholderId,
+    setPersistedReasoningWatermark,
     updateSessionMeta,
 } from "../../features/magic-context/storage";
 import type { Tagger } from "../../features/magic-context/tagger";
@@ -9,6 +21,7 @@ import type { ContextUsage } from "../../features/magic-context/types";
 import { log, sessionLog } from "../../shared/logger";
 import { checkCompartmentTrigger } from "./compartment-trigger";
 import {
+    getMessageRemovedInfo,
     getMessageUpdatedAssistantInfo,
     getSessionCreatedInfo,
     getSessionProperties,
@@ -20,6 +33,7 @@ import {
     resolveModelKey,
     resolveSessionId,
 } from "./event-resolvers";
+import { clearNoteNudgeState } from "./note-nudger";
 import type { NudgePlacementStore } from "./transform";
 
 const CONTEXT_USAGE_TTL_MS = 60 * 60 * 1000;
@@ -29,6 +43,11 @@ type CacheTtlConfig = string | Record<string, string>;
 interface ContextUsageEntry {
     usage: ContextUsage;
     updatedAt: number;
+}
+
+interface MessageRemovedCleanupResult {
+    clearedNudgePlacement: boolean;
+    clearedNoteNudge: boolean;
 }
 
 export interface EventHandlerDeps {
@@ -53,6 +72,96 @@ function evictExpiredUsageEntries(contextUsageMap: Map<string, ContextUsageEntry
             contextUsageMap.delete(sessionId);
         }
     }
+}
+
+function cleanupRemovedMessageState(
+    deps: EventHandlerDeps,
+    sessionId: string,
+    messageId: string,
+): MessageRemovedCleanupResult {
+    return deps.db.transaction(() => {
+        const removedTagNumbers = deleteTagsByMessageId(deps.db, sessionId, messageId);
+        sessionLog(
+            sessionId,
+            `event message.removed: deleted ${removedTagNumbers.length} tag(s) for message ${messageId}`,
+        );
+
+        const strippedPlaceholderRemoved = removeStrippedPlaceholderId(
+            deps.db,
+            sessionId,
+            messageId,
+        );
+        sessionLog(
+            sessionId,
+            strippedPlaceholderRemoved
+                ? `event message.removed: removed ${messageId} from stripped placeholder ids`
+                : `event message.removed: stripped placeholder ids unchanged for ${messageId}`,
+        );
+
+        const persistedNudgePlacement = getPersistedNudgePlacement(deps.db, sessionId);
+        const clearedNudgePlacement = persistedNudgePlacement?.messageId === messageId;
+        if (clearedNudgePlacement) {
+            clearPersistedNudgePlacement(deps.db, sessionId);
+        }
+        sessionLog(
+            sessionId,
+            clearedNudgePlacement
+                ? `event message.removed: cleared nudge anchor for ${messageId}`
+                : `event message.removed: nudge anchor unchanged for ${messageId}`,
+        );
+
+        const persistedNoteNudge = getPersistedNoteNudge(deps.db, sessionId);
+        const clearedNoteNudge =
+            persistedNoteNudge.triggerMessageId === messageId ||
+            persistedNoteNudge.stickyMessageId === messageId;
+        if (clearedNoteNudge) {
+            clearPersistedNoteNudge(deps.db, sessionId);
+        }
+        sessionLog(
+            sessionId,
+            clearedNoteNudge
+                ? `event message.removed: cleared note nudge state for ${messageId}`
+                : `event message.removed: note nudge state unchanged for ${messageId}`,
+        );
+
+        const persistedStickyTurnReminder = getPersistedStickyTurnReminder(deps.db, sessionId);
+        const clearedStickyTurnReminder = persistedStickyTurnReminder?.messageId === messageId;
+        if (clearedStickyTurnReminder) {
+            clearPersistedStickyTurnReminder(deps.db, sessionId);
+        }
+        sessionLog(
+            sessionId,
+            clearedStickyTurnReminder
+                ? `event message.removed: cleared sticky turn reminder for ${messageId}`
+                : `event message.removed: sticky turn reminder unchanged for ${messageId}`,
+        );
+
+        const currentWatermark = getPersistedReasoningWatermark(deps.db, sessionId);
+        const maxRemainingTag = getMaxTagNumberBySession(deps.db, sessionId);
+        if (currentWatermark > maxRemainingTag) {
+            setPersistedReasoningWatermark(deps.db, sessionId, maxRemainingTag);
+            sessionLog(
+                sessionId,
+                `event message.removed: reset reasoning watermark ${currentWatermark}→${maxRemainingTag}`,
+            );
+        } else {
+            sessionLog(
+                sessionId,
+                `event message.removed: reasoning watermark unchanged at ${currentWatermark} (max tag ${maxRemainingTag})`,
+            );
+        }
+
+        const removedIndexedMessages = deleteIndexedMessage(deps.db, sessionId, messageId);
+        sessionLog(
+            sessionId,
+            `event message.removed: deleted ${removedIndexedMessages} indexed message row(s) for ${messageId}`,
+        );
+
+        return {
+            clearedNudgePlacement,
+            clearedNoteNudge,
+        };
+    })();
 }
 
 export function createEventHandler(deps: EventHandlerDeps) {
@@ -194,6 +303,64 @@ export function createEventHandler(deps: EventHandlerDeps) {
                 updateSessionMeta(deps.db, info.sessionID, updates);
             } catch (error) {
                 sessionLog(info.sessionID, "event message.updated persistence failed:", error);
+            }
+            return;
+        }
+
+        if (input.event.type === "message.removed") {
+            const info = getMessageRemovedInfo(input.event.properties);
+            if (!info) {
+                const sessionId = properties ? resolveSessionId(properties) : null;
+                if (sessionId) {
+                    sessionLog(
+                        sessionId,
+                        "event message.removed: no message removal info extracted from event",
+                    );
+                } else {
+                    log(
+                        "[magic-context] event message.removed: no message removal info extracted from event",
+                    );
+                }
+                return;
+            }
+
+            sessionLog(
+                info.sessionID,
+                `event message.removed: invalidating state for message ${info.messageID}`,
+            );
+
+            try {
+                const cleanup = cleanupRemovedMessageState(deps, info.sessionID, info.messageID);
+
+                deps.tagger.cleanup(info.sessionID);
+                sessionLog(
+                    info.sessionID,
+                    "event message.removed: invalidated tagger session cache",
+                );
+
+                if (cleanup.clearedNudgePlacement) {
+                    deps.nudgePlacements.clear(info.sessionID, { persist: false });
+                    sessionLog(
+                        info.sessionID,
+                        "event message.removed: cleared in-memory nudge placement cache",
+                    );
+                }
+
+                if (cleanup.clearedNoteNudge) {
+                    clearNoteNudgeState(deps.db, info.sessionID, { persist: false });
+                    sessionLog(
+                        info.sessionID,
+                        "event message.removed: cleared in-memory note nudge state",
+                    );
+                }
+
+                deps.onSessionCacheInvalidated?.(info.sessionID);
+                sessionLog(
+                    info.sessionID,
+                    "event message.removed: cleared session injection cache",
+                );
+            } catch (error) {
+                sessionLog(info.sessionID, "event message.removed cleanup failed:", error);
             }
             return;
         }

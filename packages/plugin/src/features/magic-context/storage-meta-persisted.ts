@@ -8,6 +8,10 @@ interface PersistedUsageRow {
     last_response_time: number;
 }
 
+interface PersistedReasoningWatermarkRow {
+    cleared_reasoning_through_tag: number;
+}
+
 interface PersistedNudgePlacementRow {
     nudge_anchor_message_id: string;
     nudge_anchor_text: string;
@@ -45,6 +49,12 @@ function isPersistedUsageRow(row: unknown): row is PersistedUsageRow {
         typeof r.last_input_tokens === "number" &&
         typeof r.last_response_time === "number"
     );
+}
+
+function isPersistedReasoningWatermarkRow(row: unknown): row is PersistedReasoningWatermarkRow {
+    if (row === null || typeof row !== "object") return false;
+    const r = row as Record<string, unknown>;
+    return typeof r.cleared_reasoning_through_tag === "number";
 }
 
 function isPersistedNudgePlacementRow(row: unknown): row is PersistedNudgePlacementRow {
@@ -106,6 +116,25 @@ export function loadPersistedUsage(
         },
         updatedAt: result.last_response_time || Date.now(),
     };
+}
+
+export function getPersistedReasoningWatermark(db: Database, sessionId: string): number {
+    const result = db
+        .prepare("SELECT cleared_reasoning_through_tag FROM session_meta WHERE session_id = ?")
+        .get(sessionId);
+
+    return isPersistedReasoningWatermarkRow(result) ? result.cleared_reasoning_through_tag : 0;
+}
+
+export function setPersistedReasoningWatermark(
+    db: Database,
+    sessionId: string,
+    tagNumber: number,
+): void {
+    ensureSessionMetaRow(db, sessionId);
+    db.prepare(
+        "UPDATE session_meta SET cleared_reasoning_through_tag = ? WHERE session_id = ?",
+    ).run(tagNumber, sessionId);
 }
 
 export function getPersistedNudgePlacement(
@@ -295,4 +324,18 @@ export function setStrippedPlaceholderIds(db: Database, sessionId: string, ids: 
         json,
         sessionId,
     );
+}
+
+export function removeStrippedPlaceholderId(
+    db: Database,
+    sessionId: string,
+    messageId: string,
+): boolean {
+    const ids = getStrippedPlaceholderIds(db, sessionId);
+    if (!ids.delete(messageId)) {
+        return false;
+    }
+
+    setStrippedPlaceholderIds(db, sessionId, ids);
+    return true;
 }

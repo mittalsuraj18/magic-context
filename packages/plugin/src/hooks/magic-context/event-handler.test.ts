@@ -7,11 +7,21 @@ import { join } from "node:path";
 import {
     closeDatabase,
     getOrCreateSessionMeta,
+    getPersistedNudgePlacement,
+    getPersistedStickyTurnReminder,
+    getStrippedPlaceholderIds,
     getTagsBySession,
     insertTag,
     openDatabase,
+    setPersistedNudgePlacement,
+    setPersistedStickyTurnReminder,
+    setStrippedPlaceholderIds,
     updateSessionMeta,
 } from "../../features/magic-context/storage";
+import {
+    getPersistedNoteNudge,
+    setPersistedDeliveredNoteNudge,
+} from "../../features/magic-context/storage-meta-persisted";
 import type { ContextUsage } from "../../features/magic-context/types";
 import { createEventHandler } from "./event-handler";
 
@@ -43,6 +53,32 @@ function resolveContextLimit(): number {
         process.env.ANTHROPIC_1M_CONTEXT === "true" ||
         process.env.VERTEX_ANTHROPIC_1M_CONTEXT === "true";
     return oneMillionContextEnabled ? 1_000_000 : 200_000;
+}
+
+function countIndexedMessages(sessionId: string, messageId: string): number {
+    const row = openDatabase()
+        .prepare(
+            "SELECT COUNT(*) AS count FROM message_history_fts WHERE session_id = ? AND message_id = ?",
+        )
+        .get(sessionId, messageId) as { count?: number } | null;
+
+    return typeof row?.count === "number" ? row.count : 0;
+}
+
+function countSessionMetaRows(sessionId: string): number {
+    const row = openDatabase()
+        .prepare("SELECT COUNT(*) AS count FROM session_meta WHERE session_id = ?")
+        .get(sessionId) as { count?: number } | null;
+
+    return typeof row?.count === "number" ? row.count : 0;
+}
+
+function countMessageIndexRows(sessionId: string): number {
+    const row = openDatabase()
+        .prepare("SELECT COUNT(*) AS count FROM message_history_index WHERE session_id = ?")
+        .get(sessionId) as { count?: number } | null;
+
+    return typeof row?.count === "number" ? row.count : 0;
 }
 
 function createDeps(contextUsageMap: Map<string, { usage: ContextUsage; updatedAt: number }>) {
@@ -312,5 +348,176 @@ describe("createEventHandler", () => {
         expect(clearNudgePlacement).toHaveBeenCalledWith("ses-clean");
         expect(getTagsBySession(openDatabase(), "ses-clean")).toHaveLength(0);
         expect(getOrCreateSessionMeta(openDatabase(), "ses-clean").isSubagent).toBe(false);
+    });
+
+    it("cleans up removed-message tags and indexed content", async () => {
+        useTempDataHome("context-event-message-removed-tags-");
+        const deps = createDeps(new Map());
+        const handler = createEventHandler(deps);
+
+        insertTag(deps.db, "ses-removed", "msg-removed:p0", "message", 32, 1);
+        insertTag(deps.db, "ses-removed", "msg-removed:file1", "file", 48, 2);
+        insertTag(deps.db, "ses-removed", "msg-keep:p0", "message", 64, 3);
+        deps.db
+            .prepare(
+                "INSERT INTO message_history_fts (session_id, message_ordinal, message_id, role, content) VALUES (?, ?, ?, ?, ?)",
+            )
+            .run("ses-removed", 1, "msg-removed", "assistant", "removed");
+        deps.db
+            .prepare(
+                "INSERT INTO message_history_fts (session_id, message_ordinal, message_id, role, content) VALUES (?, ?, ?, ?, ?)",
+            )
+            .run("ses-removed", 2, "msg-keep", "assistant", "keep");
+        deps.db
+            .prepare(
+                "INSERT INTO message_history_index (session_id, last_indexed_ordinal, updated_at) VALUES (?, ?, ?)",
+            )
+            .run("ses-removed", 2, Date.now());
+
+        await handler({
+            event: {
+                type: "message.removed",
+                properties: { sessionID: "ses-removed", messageID: "msg-removed" },
+            },
+        });
+
+        expect(getTagsBySession(openDatabase(), "ses-removed")).toEqual([
+            {
+                tagNumber: 3,
+                messageId: "msg-keep:p0",
+                type: "message",
+                status: "active",
+                byteSize: 64,
+                sessionId: "ses-removed",
+            },
+        ]);
+        expect(countIndexedMessages("ses-removed", "msg-removed")).toBe(0);
+        expect(countIndexedMessages("ses-removed", "msg-keep")).toBe(1);
+        expect(countMessageIndexRows("ses-removed")).toBe(0);
+        expect(deps.tagger.cleanup).toHaveBeenCalledWith("ses-removed");
+    });
+
+    it("resets the reasoning watermark when removed tags exceed the remaining max tag", async () => {
+        useTempDataHome("context-event-message-removed-watermark-");
+        const deps = createDeps(new Map());
+        const handler = createEventHandler(deps);
+
+        insertTag(deps.db, "ses-watermark", "msg-keep:p0", "message", 32, 1);
+        insertTag(deps.db, "ses-watermark", "msg-removed:p0", "message", 32, 5);
+        updateSessionMeta(deps.db, "ses-watermark", { clearedReasoningThroughTag: 7 });
+
+        await handler({
+            event: {
+                type: "message.removed",
+                properties: { sessionID: "ses-watermark", messageID: "msg-removed" },
+            },
+        });
+
+        expect(
+            getOrCreateSessionMeta(openDatabase(), "ses-watermark").clearedReasoningThroughTag,
+        ).toBe(1);
+    });
+
+    it("clears the nudge anchor when the removed message was the anchor", async () => {
+        useTempDataHome("context-event-message-removed-anchor-");
+        const deps = createDeps(new Map());
+        const handler = createEventHandler(deps);
+
+        setPersistedNudgePlacement(
+            deps.db,
+            "ses-anchor",
+            "msg-anchor",
+            "<instruction>nudge</instruction>",
+        );
+
+        await handler({
+            event: {
+                type: "message.removed",
+                properties: { sessionID: "ses-anchor", messageID: "msg-anchor" },
+            },
+        });
+
+        expect(getPersistedNudgePlacement(openDatabase(), "ses-anchor")).toBeNull();
+        expect(deps.nudgePlacements.clear).toHaveBeenCalledWith("ses-anchor", { persist: false });
+    });
+
+    it("clears note nudge state when the removed message is referenced", async () => {
+        useTempDataHome("context-event-message-removed-note-");
+        const deps = createDeps(new Map());
+        const handler = createEventHandler(deps);
+
+        setPersistedDeliveredNoteNudge(deps.db, "ses-note", "Remember this", "msg-note");
+
+        await handler({
+            event: {
+                type: "message.removed",
+                properties: { sessionID: "ses-note", messageID: "msg-note" },
+            },
+        });
+
+        expect(getPersistedNoteNudge(openDatabase(), "ses-note")).toEqual({
+            triggerPending: false,
+            triggerMessageId: null,
+            stickyText: null,
+            stickyMessageId: null,
+        });
+    });
+
+    it("clears sticky turn reminders when the removed message was the reminder anchor", async () => {
+        useTempDataHome("context-event-message-removed-sticky-reminder-");
+        const deps = createDeps(new Map());
+        const handler = createEventHandler(deps);
+
+        setPersistedStickyTurnReminder(
+            deps.db,
+            "ses-reminder",
+            "remember to reduce",
+            "msg-reminder",
+        );
+
+        await handler({
+            event: {
+                type: "message.removed",
+                properties: { sessionID: "ses-reminder", messageID: "msg-reminder" },
+            },
+        });
+
+        expect(getPersistedStickyTurnReminder(openDatabase(), "ses-reminder")).toBeNull();
+    });
+
+    it("removes deleted message ids from stripped placeholder state", async () => {
+        useTempDataHome("context-event-message-removed-stripped-");
+        const deps = createDeps(new Map());
+        const handler = createEventHandler(deps);
+
+        setStrippedPlaceholderIds(deps.db, "ses-stripped", new Set(["msg-keep", "msg-removed"]));
+
+        await handler({
+            event: {
+                type: "message.removed",
+                properties: { sessionID: "ses-stripped", messageID: "msg-removed" },
+            },
+        });
+
+        expect(getStrippedPlaceholderIds(openDatabase(), "ses-stripped")).toEqual(
+            new Set(["msg-keep"]),
+        );
+    });
+
+    it("is a no-op for removed messages with no persisted references", async () => {
+        useTempDataHome("context-event-message-removed-noop-");
+        const deps = createDeps(new Map());
+        const handler = createEventHandler(deps);
+
+        await handler({
+            event: {
+                type: "message.removed",
+                properties: { sessionID: "ses-noop", messageID: "msg-missing" },
+            },
+        });
+
+        expect(getTagsBySession(openDatabase(), "ses-noop")).toHaveLength(0);
+        expect(countIndexedMessages("ses-noop", "msg-missing")).toBe(0);
+        expect(countSessionMetaRows("ses-noop")).toBe(0);
     });
 });

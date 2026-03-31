@@ -3,6 +3,7 @@ import { isRecord } from "../../shared/record-type-guard";
 export type MagicContextEventType =
     | "session.created"
     | "message.updated"
+    | "message.removed"
     | "session.compacted"
     | "session.deleted";
 
@@ -31,6 +32,11 @@ export interface MessageUpdatedAssistantInfo {
             write?: number;
         };
     };
+}
+
+export interface MessageRemovedInfo {
+    sessionID: string;
+    messageID: string;
 }
 
 export function getSessionProperties(
@@ -95,5 +101,20 @@ export function getMessageUpdatedAssistantInfo(
                 write: typeof cache?.write === "number" ? cache.write : undefined,
             },
         },
+    };
+}
+
+export function getMessageRemovedInfo(properties: unknown): MessageRemovedInfo | null {
+    if (!isRecord(properties)) {
+        return null;
+    }
+
+    if (typeof properties.sessionID !== "string" || typeof properties.messageID !== "string") {
+        return null;
+    }
+
+    return {
+        sessionID: properties.sessionID,
+        messageID: properties.messageID,
     };
 }

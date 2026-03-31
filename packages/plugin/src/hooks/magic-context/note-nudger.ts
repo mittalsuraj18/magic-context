@@ -175,7 +175,13 @@ export function getNoteNudgeText(db: Database, sessionId: string): string | null
 /**
  * Call when session is deleted or notes are read to clear persisted state.
  */
-export function clearNoteNudgeState(db: Database, sessionId: string): void {
-    clearPersistedNoteNudge(db, sessionId);
+export function clearNoteNudgeState(
+    db: Database,
+    sessionId: string,
+    options?: { persist?: boolean },
+): void {
+    if (options?.persist !== false) {
+        clearPersistedNoteNudge(db, sessionId);
+    }
     lastDeliveredAt.delete(sessionId); // also reset in-memory cooldown
 }

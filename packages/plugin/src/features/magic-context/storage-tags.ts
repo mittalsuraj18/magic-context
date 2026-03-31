@@ -6,6 +6,9 @@ type PreparedStatement = ReturnType<Database["prepare"]>;
 const insertTagStatements = new WeakMap<Database, PreparedStatement>();
 const updateTagStatusStatements = new WeakMap<Database, PreparedStatement>();
 const updateTagMessageIdStatements = new WeakMap<Database, PreparedStatement>();
+const getTagNumbersByMessageIdStatements = new WeakMap<Database, PreparedStatement>();
+const deleteTagsByMessageIdStatements = new WeakMap<Database, PreparedStatement>();
+const getMaxTagNumberBySessionStatements = new WeakMap<Database, PreparedStatement>();
 
 function getInsertTagStatement(db: Database): PreparedStatement {
     let stmt = insertTagStatements.get(db);
@@ -36,6 +39,39 @@ function getUpdateTagMessageIdStatement(db: Database): PreparedStatement {
     return stmt;
 }
 
+function getTagNumbersByMessageIdStatement(db: Database): PreparedStatement {
+    let stmt = getTagNumbersByMessageIdStatements.get(db);
+    if (!stmt) {
+        stmt = db.prepare(
+            "SELECT tag_number FROM tags WHERE session_id = ? AND (message_id = ? OR message_id LIKE ? ESCAPE '\\' OR message_id LIKE ? ESCAPE '\\') ORDER BY tag_number ASC",
+        );
+        getTagNumbersByMessageIdStatements.set(db, stmt);
+    }
+    return stmt;
+}
+
+function getDeleteTagsByMessageIdStatement(db: Database): PreparedStatement {
+    let stmt = deleteTagsByMessageIdStatements.get(db);
+    if (!stmt) {
+        stmt = db.prepare(
+            "DELETE FROM tags WHERE session_id = ? AND (message_id = ? OR message_id LIKE ? ESCAPE '\\' OR message_id LIKE ? ESCAPE '\\')",
+        );
+        deleteTagsByMessageIdStatements.set(db, stmt);
+    }
+    return stmt;
+}
+
+function getMaxTagNumberBySessionStatement(db: Database): PreparedStatement {
+    let stmt = getMaxTagNumberBySessionStatements.get(db);
+    if (!stmt) {
+        stmt = db.prepare(
+            "SELECT COALESCE(MAX(tag_number), 0) AS max_tag_number FROM tags WHERE session_id = ?",
+        );
+        getMaxTagNumberBySessionStatements.set(db, stmt);
+    }
+    return stmt;
+}
+
 interface TagRow {
     id: number;
     message_id: string;
@@ -44,6 +80,14 @@ interface TagRow {
     byte_size: number;
     session_id: string;
     tag_number: number;
+}
+
+interface TagNumberRow {
+    tag_number: number;
+}
+
+interface MaxTagNumberRow {
+    max_tag_number: number;
 }
 
 function isTagRow(row: unknown): row is TagRow {
@@ -72,6 +116,22 @@ function toTagEntry(row: TagRow): TagEntry {
         byteSize: row.byte_size,
         sessionId: row.session_id,
     };
+}
+
+function isTagNumberRow(row: unknown): row is TagNumberRow {
+    if (row === null || typeof row !== "object") return false;
+    const r = row as Record<string, unknown>;
+    return typeof r.tag_number === "number";
+}
+
+function isMaxTagNumberRow(row: unknown): row is MaxTagNumberRow {
+    if (row === null || typeof row !== "object") return false;
+    const r = row as Record<string, unknown>;
+    return typeof r.max_tag_number === "number";
+}
+
+function escapeLikePattern(value: string): string {
+    return value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
 }
 
 export function insertTag(
@@ -103,6 +163,37 @@ export function updateTagMessageId(
     messageId: string,
 ): void {
     getUpdateTagMessageIdStatement(db).run(messageId, sessionId, tagId);
+}
+
+export function deleteTagsByMessageId(
+    db: Database,
+    sessionId: string,
+    messageId: string,
+): number[] {
+    const escapedMessageId = escapeLikePattern(messageId);
+    const textPartPattern = `${escapedMessageId}:p%`;
+    const filePartPattern = `${escapedMessageId}:file%`;
+    const tagNumbers = getTagNumbersByMessageIdStatement(db)
+        .all(sessionId, messageId, textPartPattern, filePartPattern)
+        .filter(isTagNumberRow)
+        .map((row) => row.tag_number);
+
+    if (tagNumbers.length === 0) {
+        return [];
+    }
+
+    getDeleteTagsByMessageIdStatement(db).run(
+        sessionId,
+        messageId,
+        textPartPattern,
+        filePartPattern,
+    );
+    return tagNumbers;
+}
+
+export function getMaxTagNumberBySession(db: Database, sessionId: string): number {
+    const row = getMaxTagNumberBySessionStatement(db).get(sessionId);
+    return isMaxTagNumberRow(row) ? row.max_tag_number : 0;
 }
 
 export function getTagsBySession(db: Database, sessionId: string): TagEntry[] {

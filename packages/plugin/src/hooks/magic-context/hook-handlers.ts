@@ -139,6 +139,10 @@ export function createEventHook(args: {
             clearNoteNudgeState(args.db, sessionId);
         }
 
+        if (input.event.type === "message.removed") {
+            return;
+        }
+
         const entry = args.contextUsageMap.get(sessionId);
         if (!entry) return;
 

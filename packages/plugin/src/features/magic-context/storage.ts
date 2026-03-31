@@ -8,6 +8,10 @@ export {
     type SessionFact,
 } from "./compartment-storage";
 export {
+    clearIndexedMessages,
+    deleteIndexedMessage,
+} from "./message-index";
+export {
     type ContextDatabase,
     closeDatabase,
     getDatabasePersistenceError,
@@ -15,15 +19,20 @@ export {
     openDatabase,
 } from "./storage-db";
 export {
+    clearPersistedNoteNudge,
     clearPersistedNudgePlacement,
     clearPersistedStickyTurnReminder,
     clearSession,
     getOrCreateSessionMeta,
+    getPersistedNoteNudge,
     getPersistedNudgePlacement,
+    getPersistedReasoningWatermark,
     getPersistedStickyTurnReminder,
     getStrippedPlaceholderIds,
     loadPersistedUsage,
+    removeStrippedPlaceholderId,
     setPersistedNudgePlacement,
+    setPersistedReasoningWatermark,
     setPersistedStickyTurnReminder,
     setStrippedPlaceholderIds,
     updateSessionMeta,
@@ -59,6 +68,8 @@ export {
     saveSourceContent,
 } from "./storage-source";
 export {
+    deleteTagsByMessageId,
+    getMaxTagNumberBySession,
     getTagById,
     getTagsBySession,
     getTopNBySize,

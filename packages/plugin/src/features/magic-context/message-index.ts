@@ -18,6 +18,8 @@ const insertMessageStatements = new WeakMap<Database, PreparedStatement>();
 const upsertIndexStatements = new WeakMap<Database, PreparedStatement>();
 const deleteFtsStatements = new WeakMap<Database, PreparedStatement>();
 const deleteIndexStatements = new WeakMap<Database, PreparedStatement>();
+const countIndexedMessageStatements = new WeakMap<Database, PreparedStatement>();
+const deleteIndexedMessageStatements = new WeakMap<Database, PreparedStatement>();
 
 function normalizeIndexText(text: string): string {
     return text.replace(/\s+/g, " ").trim();
@@ -74,9 +76,46 @@ function getDeleteIndexStatement(db: Database): PreparedStatement {
     return stmt;
 }
 
+function getCountIndexedMessageStatement(db: Database): PreparedStatement {
+    let stmt = countIndexedMessageStatements.get(db);
+    if (!stmt) {
+        stmt = db.prepare(
+            "SELECT COUNT(*) AS count FROM message_history_fts WHERE session_id = ? AND message_id = ?",
+        );
+        countIndexedMessageStatements.set(db, stmt);
+    }
+    return stmt;
+}
+
+function getDeleteIndexedMessageStatement(db: Database): PreparedStatement {
+    let stmt = deleteIndexedMessageStatements.get(db);
+    if (!stmt) {
+        stmt = db.prepare(
+            "DELETE FROM message_history_fts WHERE session_id = ? AND message_id = ?",
+        );
+        deleteIndexedMessageStatements.set(db, stmt);
+    }
+    return stmt;
+}
+
+interface CountRow {
+    count: number;
+}
+
 function getLastIndexedOrdinal(db: Database, sessionId: string): number {
     const row = getLastIndexedStatement(db).get(sessionId) as MessageHistoryIndexRow | null;
     return typeof row?.last_indexed_ordinal === "number" ? row.last_indexed_ordinal : 0;
+}
+
+export function deleteIndexedMessage(db: Database, sessionId: string, messageId: string): number {
+    const row = getCountIndexedMessageStatement(db).get(sessionId, messageId) as CountRow | null;
+    const count = typeof row?.count === "number" ? row.count : 0;
+    if (count > 0) {
+        getDeleteIndexedMessageStatement(db).run(sessionId, messageId);
+    }
+
+    getDeleteIndexStatement(db).run(sessionId);
+    return count;
 }
 
 export function clearIndexedMessages(db: Database, sessionId: string): void {

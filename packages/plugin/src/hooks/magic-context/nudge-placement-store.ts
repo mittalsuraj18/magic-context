@@ -13,7 +13,7 @@ interface NudgePlacement {
 export interface NudgePlacementStore {
     set(sessionId: string, messageId: string, nudgeText: string): void;
     get(sessionId: string): NudgePlacement | null;
-    clear(sessionId: string): void;
+    clear(sessionId: string, options?: { persist?: boolean }): void;
 }
 
 export function createNudgePlacementStore(db?: Database): NudgePlacementStore {
@@ -40,10 +40,10 @@ export function createNudgePlacementStore(db?: Database): NudgePlacementStore {
             store.set(sessionId, persisted);
             return persisted;
         },
-        clear(sessionId) {
+        clear(sessionId, options) {
             store.delete(sessionId);
             missingSessions.add(sessionId);
-            if (db) {
+            if (db && options?.persist !== false) {
                 clearPersistedNudgePlacement(db, sessionId);
             }
         },
