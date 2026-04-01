@@ -122,6 +122,16 @@ pub fn get_session_meta(
     db::get_session_meta(&conn, &session_id).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn get_context_token_breakdown(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Option<db::ContextTokenBreakdown>, String> {
+    let path = state.get_db_path()?;
+    let conn = db::open_readonly(&path).map_err(|e| e.to_string())?;
+    db::get_context_token_breakdown(&conn, &session_id).map_err(|e| e.to_string())
+}
+
 // ── Dreamer commands ────────────────────────────────────────
 
 #[tauri::command]

@@ -49,6 +49,7 @@ fn main() {
             commands::get_session_facts,
             commands::get_session_notes,
             commands::get_session_meta,
+            commands::get_context_token_breakdown,
             // Dreamer
             commands::get_dream_queue,
             commands::get_dream_state,
@@ -58,13 +59,13 @@ fn main() {
             commands::get_cache_events,
             commands::get_session_cache_stats,
             // Config
-commands::get_config,
-commands::save_config,
-commands::get_project_configs,
-commands::save_project_config,
+            commands::get_config,
+            commands::save_config,
+            commands::get_project_configs,
+            commands::save_project_config,
             // Models
             commands::get_available_models,
-                commands::test_embedding_endpoint,
+            commands::test_embedding_endpoint,
             // Health
             commands::get_db_health,
         ])

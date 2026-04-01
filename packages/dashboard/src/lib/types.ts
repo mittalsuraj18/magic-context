@@ -110,6 +110,17 @@ export interface SessionMetaRow {
   memory_block_count: number;
 }
 
+export interface ContextTokenBreakdown {
+  total_input_tokens: number;
+  compartment_tokens: number;
+  fact_tokens: number;
+  memory_tokens: number;
+  conversation_tokens: number;
+  compartment_count: number;
+  fact_count: number;
+  memory_count: number;
+}
+
 export interface DreamQueueEntry {
   id: number;
   project_path: string;

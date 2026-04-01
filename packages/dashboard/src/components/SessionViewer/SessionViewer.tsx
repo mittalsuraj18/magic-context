@@ -1,5 +1,5 @@
 import { createSignal, createResource, createMemo, For, Index, Show } from "solid-js";
-import type { SessionSummary, Compartment, SessionFact, SessionNote, SessionMetaRow } from "../../lib/types";
+import type { SessionSummary, Compartment, SessionFact, SessionNote, SessionMetaRow, ContextTokenBreakdown } from "../../lib/types";
 import {
   getProjects,
   getSessions,
@@ -7,6 +7,7 @@ import {
   getSessionFacts,
   getSessionNotes,
   getSessionMeta,
+  getContextTokenBreakdown,
   formatRelativeTime,
   truncate,
 } from "../../lib/api";
@@ -14,7 +15,7 @@ import FilterSelect from "../shared/FilterSelect";
 
 export default function SessionViewer() {
   const [selectedSession, setSelectedSession] = createSignal<string | null>(null);
-  const [activeTab, setActiveTab] = createSignal<"compartments" | "facts" | "notes" | "meta">("compartments");
+  const [activeTab, setActiveTab] = createSignal<"compartments" | "facts" | "notes" | "meta" | "tokens">("compartments");
   const [expandedCompartment, setExpandedCompartment] = createSignal<number | null>(null);
   const [searchQuery, setSearchQuery] = createSignal("");
   const [projectFilter, setProjectFilter] = createSignal("");
@@ -66,6 +67,11 @@ export default function SessionViewer() {
   const [meta] = createResource(selectedSession, async (sid) => {
     if (!sid) return null;
     return getSessionMeta(sid);
+  });
+
+  const [tokenBreakdown] = createResource(selectedSession, async (sid) => {
+    if (!sid) return null;
+    return getContextTokenBreakdown(sid);
   });
 
   const toggleCompartment = (id: number) => {
@@ -201,6 +207,9 @@ export default function SessionViewer() {
           </button>
           <button class={`tab-pill ${activeTab() === "meta" ? "active" : ""}`} onClick={() => setActiveTab("meta")}>
             Meta
+          </button>
+          <button class={`tab-pill ${activeTab() === "tokens" ? "active" : ""}`} onClick={() => setActiveTab("tokens")}>
+            Tokens
           </button>
         </div>
 
@@ -370,6 +379,203 @@ export default function SessionViewer() {
                   </tbody>
                 </table>
               )}
+            </Show>
+          </Show>
+
+          {/* Tokens tab */}
+          <Show when={activeTab() === "tokens"}>
+            <Show when={tokenBreakdown()} fallback={<div class="empty-state">No token data available</div>}>
+              {(data) => {
+                const total = () => data().total_input_tokens;
+                const hasData = () => total() > 0;
+                
+                // Calculate percentages
+                const compartmentPct = () => hasData() ? (data().compartment_tokens / total()) * 100 : 0;
+                const factPct = () => hasData() ? (data().fact_tokens / total()) * 100 : 0;
+                const memoryPct = () => hasData() ? (data().memory_tokens / total()) * 100 : 0;
+                const conversationPct = () => hasData() ? (data().conversation_tokens / total()) * 100 : 0;
+
+                // Colors for each section
+                const colors = {
+                  compartments: "#4a9eff",
+                  facts: "#f0b429",
+                  memories: "#48bb78",
+                  conversation: "#a0aec0",
+                };
+
+                return (
+                  <div class="list-gap">
+                    {/* Stacked bar */}
+                    <div class="card">
+                      <div class="card-title" style={{ "margin-bottom": "16px" }}>
+                        Context Token Breakdown
+                      </div>
+                      
+                      <Show when={hasData()} fallback={<div class="empty-state">No input token data recorded</div>}>
+                        {/* Stacked bar visualization */}
+                        <div style={{
+                          display: "flex",
+                          height: "32px",
+                          "border-radius": "8px",
+                          overflow: "hidden",
+                          "margin-bottom": "20px",
+                        }}>
+                          <Show when={data().compartment_tokens > 0}>
+                            <div style={{
+                              width: `${compartmentPct()}%`,
+                              background: colors.compartments,
+                              display: "flex",
+                              "align-items": "center",
+                              "justify-content": "center",
+                              "font-size": "11px",
+                              "font-weight": "600",
+                              color: "#fff",
+                              "min-width": compartmentPct() > 8 ? "auto" : "0",
+                            }}>
+                              {compartmentPct() > 8 ? `${compartmentPct().toFixed(0)}%` : ""}
+                            </div>
+                          </Show>
+                          <Show when={data().fact_tokens > 0}>
+                            <div style={{
+                              width: `${factPct()}%`,
+                              background: colors.facts,
+                              display: "flex",
+                              "align-items": "center",
+                              "justify-content": "center",
+                              "font-size": "11px",
+                              "font-weight": "600",
+                              color: "#1a1a1a",
+                              "min-width": factPct() > 8 ? "auto" : "0",
+                            }}>
+                              {factPct() > 8 ? `${factPct().toFixed(0)}%` : ""}
+                            </div>
+                          </Show>
+                          <Show when={data().memory_tokens > 0}>
+                            <div style={{
+                              width: `${memoryPct()}%`,
+                              background: colors.memories,
+                              display: "flex",
+                              "align-items": "center",
+                              "justify-content": "center",
+                              "font-size": "11px",
+                              "font-weight": "600",
+                              color: "#fff",
+                              "min-width": memoryPct() > 8 ? "auto" : "0",
+                            }}>
+                              {memoryPct() > 8 ? `${memoryPct().toFixed(0)}%` : ""}
+                            </div>
+                          </Show>
+                          <Show when={data().conversation_tokens > 0}>
+                            <div style={{
+                              width: `${conversationPct()}%`,
+                              background: colors.conversation,
+                              display: "flex",
+                              "align-items": "center",
+                              "justify-content": "center",
+                              "font-size": "11px",
+                              "font-weight": "600",
+                              color: "#1a1a1a",
+                              "min-width": conversationPct() > 8 ? "auto" : "0",
+                            }}>
+                              {conversationPct() > 8 ? `${conversationPct().toFixed(0)}%` : ""}
+                            </div>
+                          </Show>
+                        </div>
+
+                        {/* Legend with details */}
+                        <div style={{ display: "flex", "flex-direction": "column", gap: "12px" }}>
+                          {/* Compartments */}
+                          <div style={{ display: "flex", "align-items": "center", gap: "12px" }}>
+                            <div style={{
+                              width: "12px",
+                              height: "12px",
+                              "border-radius": "3px",
+                              background: colors.compartments,
+                              "flex-shrink": "0",
+                            }} />
+                            <div style={{ flex: 1, display: "flex", "justify-content": "space-between", "align-items": "center" }}>
+                              <span style={{ "font-size": "13px" }}>
+                                Compartments <span style={{ color: "var(--text-muted)", "font-size": "12px" }}>({data().compartment_count})</span>
+                              </span>
+                              <span style={{ "font-size": "13px", "font-weight": "500", "font-family": "var(--font-mono)" }}>
+                                {data().compartment_tokens.toLocaleString()} <span style={{ color: "var(--text-muted)", "font-size": "12px" }}>({compartmentPct().toFixed(1)}%)</span>
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Facts */}
+                          <div style={{ display: "flex", "align-items": "center", gap: "12px" }}>
+                            <div style={{
+                              width: "12px",
+                              height: "12px",
+                              "border-radius": "3px",
+                              background: colors.facts,
+                              "flex-shrink": "0",
+                            }} />
+                            <div style={{ flex: 1, display: "flex", "justify-content": "space-between", "align-items": "center" }}>
+                              <span style={{ "font-size": "13px" }}>
+                                Facts <span style={{ color: "var(--text-muted)", "font-size": "12px" }}>({data().fact_count})</span>
+                              </span>
+                              <span style={{ "font-size": "13px", "font-weight": "500", "font-family": "var(--font-mono)" }}>
+                                {data().fact_tokens.toLocaleString()} <span style={{ color: "var(--text-muted)", "font-size": "12px" }}>({factPct().toFixed(1)}%)</span>
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Memories */}
+                          <div style={{ display: "flex", "align-items": "center", gap: "12px" }}>
+                            <div style={{
+                              width: "12px",
+                              height: "12px",
+                              "border-radius": "3px",
+                              background: colors.memories,
+                              "flex-shrink": "0",
+                            }} />
+                            <div style={{ flex: 1, display: "flex", "justify-content": "space-between", "align-items": "center" }}>
+                              <span style={{ "font-size": "13px" }}>
+                                Memories <span style={{ color: "var(--text-muted)", "font-size": "12px" }}>({data().memory_count})</span>
+                              </span>
+                              <span style={{ "font-size": "13px", "font-weight": "500", "font-family": "var(--font-mono)" }}>
+                                {data().memory_tokens.toLocaleString()} <span style={{ color: "var(--text-muted)", "font-size": "12px" }}>({memoryPct().toFixed(1)}%)</span>
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Conversation */}
+                          <div style={{ display: "flex", "align-items": "center", gap: "12px" }}>
+                            <div style={{
+                              width: "12px",
+                              height: "12px",
+                              "border-radius": "3px",
+                              background: colors.conversation,
+                              "flex-shrink": "0",
+                            }} />
+                            <div style={{ flex: 1, display: "flex", "justify-content": "space-between", "align-items": "center" }}>
+                              <span style={{ "font-size": "13px" }}>
+                                Conversation + System
+                              </span>
+                              <span style={{ "font-size": "13px", "font-weight": "500", "font-family": "var(--font-mono)" }}>
+                                {data().conversation_tokens.toLocaleString()} <span style={{ color: "var(--text-muted)", "font-size": "12px" }}>({conversationPct().toFixed(1)}%)</span>
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Divider */}
+                          <div style={{ borderTop: "1px solid var(--border-color)", margin: "8px 0" }} />
+
+                          {/* Total */}
+                          <div style={{ display: "flex", "justify-content": "space-between", "align-items": "center" }}>
+                            <span style={{ "font-size": "13px", "font-weight": "600" }}>Total Input Tokens</span>
+                            <span style={{ "font-size": "14px", "font-weight": "600", "font-family": "var(--font-mono)" }}>
+                              {data().total_input_tokens.toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      </Show>
+                    </div>
+                  </div>
+                );
+              }}
             </Show>
           </Show>
         </div>

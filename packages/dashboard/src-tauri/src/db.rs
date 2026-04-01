@@ -177,6 +177,106 @@ pub struct DreamStateEntry {
     pub value: String,
 }
 
+// ── Context Token Breakdown ───────────────────────────────────
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ContextTokenBreakdown {
+    pub total_input_tokens: i64,
+    pub compartment_tokens: i64,
+    pub fact_tokens: i64,
+    pub memory_tokens: i64,
+    pub conversation_tokens: i64, // total - compartments - facts - memories (includes system prompt)
+    pub compartment_count: i64,
+    pub fact_count: i64,
+    pub memory_count: i64,
+}
+
+/// Estimate tokens using ~4 chars per token (CHARS_PER_TOKEN_ESTIMATE = 4)
+fn estimate_tokens(chars: i64) -> i64 {
+    (chars + 3) / 4 // Round up
+}
+
+/// XML overhead for compartments (approximate: <compartment title="...">...</compartment>)
+const COMPARTMENT_XML_OVERHEAD: i64 = 50;
+
+pub fn get_context_token_breakdown(
+    conn: &Connection,
+    session_id: &str,
+) -> Result<Option<ContextTokenBreakdown>, rusqlite::Error> {
+    // Get total input tokens from session_meta
+    let total_input_tokens: i64 = conn
+        .query_row(
+            "SELECT COALESCE(last_input_tokens, 0) FROM session_meta WHERE session_id = ?1",
+            [session_id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    // If no input tokens recorded, return None (no data available)
+    if total_input_tokens == 0 {
+        return Ok(None);
+    }
+
+    // Get compartment content length and count
+    let (compartment_chars, compartment_count): (i64, i64) = conn
+        .query_row(
+            "SELECT COALESCE(SUM(LENGTH(title) + LENGTH(content) + ?2), 0), COUNT(*) 
+             FROM compartments WHERE session_id = ?1",
+            rusqlite::params![session_id, COMPARTMENT_XML_OVERHEAD],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap_or((0, 0));
+
+    // Get fact content length and count
+    let (fact_chars, fact_count): (i64, i64) = conn
+        .query_row(
+            "SELECT COALESCE(SUM(LENGTH(category) + LENGTH(content) + 20), 0), COUNT(*) 
+             FROM session_facts WHERE session_id = ?1",
+            [session_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap_or((0, 0));
+
+    // Get memory block cache (rendered XML) and count from session_meta
+    let (memory_cache_str, memory_count): (Option<String>, i64) = conn
+        .query_row(
+            "SELECT memory_block_cache, COALESCE(memory_block_count, 0) FROM session_meta WHERE session_id = ?1",
+            [session_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap_or((None, 0));
+
+    let memory_chars = memory_cache_str
+        .as_ref()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.len() as i64)
+        .unwrap_or(0);
+
+    // Estimate tokens
+    let compartment_tokens = estimate_tokens(compartment_chars);
+    let fact_tokens = estimate_tokens(fact_chars);
+    let memory_tokens = estimate_tokens(memory_chars);
+
+    // Conversation tokens = total - known sections (includes system prompt)
+    let known_tokens = compartment_tokens + fact_tokens + memory_tokens;
+    let conversation_tokens = if total_input_tokens > known_tokens {
+        total_input_tokens - known_tokens
+    } else {
+        0
+    };
+
+    Ok(Some(ContextTokenBreakdown {
+        total_input_tokens,
+        compartment_tokens,
+        fact_tokens,
+        memory_tokens,
+        conversation_tokens,
+        compartment_count,
+        fact_count,
+        memory_count,
+    }))
+}
+
 // ── Database health ───────────────────────────────────────────
 
 #[derive(Debug, Serialize, Clone)]
@@ -215,46 +315,56 @@ fn normalize_hash(content: &str) -> String {
 #[derive(Debug, Serialize, Clone)]
 pub struct ProjectInfo {
     pub identity: String,
-    pub label: String,      // friendly name (directory basename or identity)
+    pub label: String,        // friendly name (directory basename or identity)
     pub path: Option<String>, // resolved filesystem path, if found
 }
 
 pub fn get_projects(conn: &Connection) -> Result<Vec<ProjectInfo>, rusqlite::Error> {
-    let mut stmt = conn.prepare(
-        "SELECT DISTINCT project_path FROM memories ORDER BY project_path",
-    )?;
-    let identities: Vec<String> = stmt.query_map([], |row| row.get(0))?.collect::<Result<Vec<_>, _>>()?;
+    let mut stmt =
+        conn.prepare("SELECT DISTINCT project_path FROM memories ORDER BY project_path")?;
+    let identities: Vec<String> = stmt
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
 
     // Resolve git:HASH identities via OpenCode's project table
     let hash_to_project = resolve_from_opencode_db(&identities);
 
-    let projects = identities.into_iter().map(|id| {
-        let (label, path) = if let Some((name, worktree)) = hash_to_project.get(&id) {
-            let display = if name.is_empty() {
-                // Use directory basename as label
-                std::path::Path::new(worktree)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| worktree.clone())
+    let projects = identities
+        .into_iter()
+        .map(|id| {
+            let (label, path) = if let Some((name, worktree)) = hash_to_project.get(&id) {
+                let display = if name.is_empty() {
+                    // Use directory basename as label
+                    std::path::Path::new(worktree)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| worktree.clone())
+                } else {
+                    name.clone()
+                };
+                (display, Some(worktree.clone()))
+            } else if id.starts_with("git:") {
+                let short = &id[4..std::cmp::min(id.len(), 14)];
+                (format!("git:{short}…"), None)
             } else {
-                name.clone()
+                (id.clone(), None)
             };
-            (display, Some(worktree.clone()))
-        } else if id.starts_with("git:") {
-            let short = &id[4..std::cmp::min(id.len(), 14)];
-            (format!("git:{short}…"), None)
-        } else {
-            (id.clone(), None)
-        };
-        ProjectInfo { identity: id, label, path }
-    }).collect();
+            ProjectInfo {
+                identity: id,
+                label,
+                path,
+            }
+        })
+        .collect();
 
     Ok(projects)
 }
 
 /// Look up project names and worktrees from OpenCode's own database.
 /// OpenCode stores projects with `id` = git root commit hash and `worktree` = directory path.
-fn resolve_from_opencode_db(identities: &[String]) -> std::collections::HashMap<String, (String, String)> {
+fn resolve_from_opencode_db(
+    identities: &[String],
+) -> std::collections::HashMap<String, (String, String)> {
     use std::collections::HashMap;
 
     let mut result = HashMap::new();
@@ -262,18 +372,26 @@ fn resolve_from_opencode_db(identities: &[String]) -> std::collections::HashMap<
     // Find the opencode.db path (same parent as our plugin storage)
     let opencode_db = {
         let data_dir = if cfg!(target_os = "windows") {
-            match dirs::data_dir() { Some(d) => d, None => return result }
+            match dirs::data_dir() {
+                Some(d) => d,
+                None => return result,
+            }
         } else {
             std::env::var("XDG_DATA_HOME")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| {
-                    dirs::home_dir().unwrap_or_default().join(".local").join("share")
+                    dirs::home_dir()
+                        .unwrap_or_default()
+                        .join(".local")
+                        .join("share")
                 })
         };
         data_dir.join("opencode").join("opencode.db")
     };
 
-    if !opencode_db.exists() { return result; }
+    if !opencode_db.exists() {
+        return result;
+    }
 
     let conn = match Connection::open_with_flags(
         &opencode_db,
@@ -342,7 +460,11 @@ pub fn get_memories(
             .filter(|t| !t.is_empty())
             .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
             .collect();
-        if tokens.is_empty() { String::new() } else { tokens.join(" ") }
+        if tokens.is_empty() {
+            String::new()
+        } else {
+            tokens.join(" ")
+        }
     } else {
         String::new()
     };
@@ -445,7 +567,8 @@ pub fn get_memories(
     // Try FTS first; if it fails (e.g. malformed query despite sanitization), fall back to LIKE
     let result = {
         let mut stmt = conn.prepare(&sql)?;
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
         let rows = stmt.query_map(param_refs.as_slice(), map_memory_row)?;
         rows.collect::<Result<Vec<_>, _>>()
     };
@@ -473,14 +596,21 @@ pub fn get_memories(
             let mut like_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
             like_params.push(Box::new(like_pattern));
             // Re-add filter params
-            if let Some(p) = project_filter { like_params.push(Box::new(p.to_string())); }
-            if let Some(s) = status_filter { like_params.push(Box::new(s.to_string())); }
-            if let Some(c) = category_filter { like_params.push(Box::new(c.to_string())); }
+            if let Some(p) = project_filter {
+                like_params.push(Box::new(p.to_string()));
+            }
+            if let Some(s) = status_filter {
+                like_params.push(Box::new(s.to_string()));
+            }
+            if let Some(c) = category_filter {
+                like_params.push(Box::new(c.to_string()));
+            }
             like_params.push(Box::new(limit));
             like_params.push(Box::new(offset));
 
             let mut stmt = conn.prepare(&like_sql)?;
-            let param_refs: Vec<&dyn rusqlite::types::ToSql> = like_params.iter().map(|p| p.as_ref()).collect();
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                like_params.iter().map(|p| p.as_ref()).collect();
             let rows = stmt.query_map(param_refs.as_slice(), map_memory_row)?;
             rows.collect()
         }
@@ -504,14 +634,21 @@ pub fn get_memories(
             );
             let mut like_params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
             like_params.push(Box::new(like_pattern));
-            if let Some(p) = project_filter { like_params.push(Box::new(p.to_string())); }
-            if let Some(s) = status_filter { like_params.push(Box::new(s.to_string())); }
-            if let Some(c) = category_filter { like_params.push(Box::new(c.to_string())); }
+            if let Some(p) = project_filter {
+                like_params.push(Box::new(p.to_string()));
+            }
+            if let Some(s) = status_filter {
+                like_params.push(Box::new(s.to_string()));
+            }
+            if let Some(c) = category_filter {
+                like_params.push(Box::new(c.to_string()));
+            }
             like_params.push(Box::new(limit));
             like_params.push(Box::new(offset));
 
             let mut stmt = conn.prepare(&like_sql)?;
-            let param_refs: Vec<&dyn rusqlite::types::ToSql> = like_params.iter().map(|p| p.as_ref()).collect();
+            let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                like_params.iter().map(|p| p.as_ref()).collect();
             let rows = stmt.query_map(param_refs.as_slice(), map_memory_row)?;
             rows.collect()
         }
@@ -546,29 +683,77 @@ fn map_memory_row(row: &rusqlite::Row<'_>) -> Result<Memory, rusqlite::Error> {
     })
 }
 
-pub fn get_memory_stats(conn: &Connection, project_filter: Option<&str>) -> Result<MemoryStats, rusqlite::Error> {
-    let project_clause = if project_filter.is_some() { "WHERE project_path = ?1" } else { "" };
-    let project_and = if project_filter.is_some() { "AND project_path = ?1" } else { "" };
+pub fn get_memory_stats(
+    conn: &Connection,
+    project_filter: Option<&str>,
+) -> Result<MemoryStats, rusqlite::Error> {
+    let project_clause = if project_filter.is_some() {
+        "WHERE project_path = ?1"
+    } else {
+        ""
+    };
+    let project_and = if project_filter.is_some() {
+        "AND project_path = ?1"
+    } else {
+        ""
+    };
 
     let total: i64 = if let Some(p) = project_filter {
-        conn.query_row(&format!("SELECT COUNT(*) FROM memories {}", project_clause), [p], |r| r.get(0))?
+        conn.query_row(
+            &format!("SELECT COUNT(*) FROM memories {}", project_clause),
+            [p],
+            |r| r.get(0),
+        )?
     } else {
         conn.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))?
     };
     let active: i64 = if let Some(p) = project_filter {
-        conn.query_row(&format!("SELECT COUNT(*) FROM memories WHERE status = 'active' {}", project_and), [p], |r| r.get(0))?
+        conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM memories WHERE status = 'active' {}",
+                project_and
+            ),
+            [p],
+            |r| r.get(0),
+        )?
     } else {
-        conn.query_row("SELECT COUNT(*) FROM memories WHERE status = 'active'", [], |r| r.get(0))?
+        conn.query_row(
+            "SELECT COUNT(*) FROM memories WHERE status = 'active'",
+            [],
+            |r| r.get(0),
+        )?
     };
     let permanent: i64 = if let Some(p) = project_filter {
-        conn.query_row(&format!("SELECT COUNT(*) FROM memories WHERE status = 'permanent' {}", project_and), [p], |r| r.get(0))?
+        conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM memories WHERE status = 'permanent' {}",
+                project_and
+            ),
+            [p],
+            |r| r.get(0),
+        )?
     } else {
-        conn.query_row("SELECT COUNT(*) FROM memories WHERE status = 'permanent'", [], |r| r.get(0))?
+        conn.query_row(
+            "SELECT COUNT(*) FROM memories WHERE status = 'permanent'",
+            [],
+            |r| r.get(0),
+        )?
     };
     let archived: i64 = if let Some(p) = project_filter {
-        conn.query_row(&format!("SELECT COUNT(*) FROM memories WHERE status = 'archived' {}", project_and), [p], |r| r.get(0))?
+        conn.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM memories WHERE status = 'archived' {}",
+                project_and
+            ),
+            [p],
+            |r| r.get(0),
+        )?
     } else {
-        conn.query_row("SELECT COUNT(*) FROM memories WHERE status = 'archived'", [], |r| r.get(0))?
+        conn.query_row(
+            "SELECT COUNT(*) FROM memories WHERE status = 'archived'",
+            [],
+            |r| r.get(0),
+        )?
     };
     let with_embeddings: i64 = if let Some(p) = project_filter {
         conn.query_row(
@@ -586,14 +771,31 @@ pub fn get_memory_stats(conn: &Connection, project_filter: Option<&str>) -> Resu
     };
     let mut stmt = conn.prepare(cat_sql)?;
     let categories: Vec<CategoryCount> = if let Some(p) = project_filter {
-        stmt.query_map([p], |row| Ok(CategoryCount { category: row.get(0)?, count: row.get(1)? }))?
-            .collect::<Result<Vec<_>, _>>()?
+        stmt.query_map([p], |row| {
+            Ok(CategoryCount {
+                category: row.get(0)?,
+                count: row.get(1)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?
     } else {
-        stmt.query_map([], |row| Ok(CategoryCount { category: row.get(0)?, count: row.get(1)? }))?
-            .collect::<Result<Vec<_>, _>>()?
+        stmt.query_map([], |row| {
+            Ok(CategoryCount {
+                category: row.get(0)?,
+                count: row.get(1)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?
     };
 
-    Ok(MemoryStats { total, active, permanent, archived, with_embeddings, categories })
+    Ok(MemoryStats {
+        total,
+        active,
+        permanent,
+        archived,
+        with_embeddings,
+        categories,
+    })
 }
 
 pub fn update_memory_status(
@@ -670,21 +872,23 @@ pub fn get_sessions(conn: &Connection) -> Result<Vec<SessionSummary>, rusqlite::
         ORDER BY sm.last_response_time DESC NULLS LAST
     ";
     let mut stmt = conn.prepare(sql)?;
-    let mut sessions: Vec<SessionSummary> = stmt.query_map([], |row| {
-        Ok(SessionSummary {
-            session_id: row.get(0)?,
-            title: None,
-            project_identity: None,
-            compartment_count: row.get(1)?,
-            fact_count: row.get(2)?,
-            note_count: row.get(3)?,
-            first_compartment_start: row.get(4)?,
-            last_compartment_end: row.get(5)?,
-            last_response_time: row.get(6)?,
-            last_context_percentage: row.get(7)?,
-            is_subagent: row.get::<_, i64>(8)? != 0,
-        })
-    })?.collect::<Result<Vec<_>, _>>()?;
+    let mut sessions: Vec<SessionSummary> = stmt
+        .query_map([], |row| {
+            Ok(SessionSummary {
+                session_id: row.get(0)?,
+                title: None,
+                project_identity: None,
+                compartment_count: row.get(1)?,
+                fact_count: row.get(2)?,
+                note_count: row.get(3)?,
+                first_compartment_start: row.get(4)?,
+                last_compartment_end: row.get(5)?,
+                last_response_time: row.get(6)?,
+                last_context_percentage: row.get(7)?,
+                is_subagent: row.get::<_, i64>(8)? != 0,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
 
     // Resolve session titles and project IDs from OpenCode's DB
     let session_info = resolve_session_info(&sessions);
@@ -702,26 +906,38 @@ pub fn get_sessions(conn: &Connection) -> Result<Vec<SessionSummary>, rusqlite::
 
 /// Look up session titles and project IDs from OpenCode's database.
 /// Returns HashMap<session_id, (title, project_id)>.
-fn resolve_session_info(sessions: &[SessionSummary]) -> std::collections::HashMap<String, (String, String)> {
+fn resolve_session_info(
+    sessions: &[SessionSummary],
+) -> std::collections::HashMap<String, (String, String)> {
     use std::collections::HashMap;
 
     let mut result = HashMap::new();
-    if sessions.is_empty() { return result; }
+    if sessions.is_empty() {
+        return result;
+    }
 
     let opencode_db = {
         let data_dir = if cfg!(target_os = "windows") {
-            match dirs::data_dir() { Some(d) => d, None => return result }
+            match dirs::data_dir() {
+                Some(d) => d,
+                None => return result,
+            }
         } else {
             std::env::var("XDG_DATA_HOME")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| {
-                    dirs::home_dir().unwrap_or_default().join(".local").join("share")
+                    dirs::home_dir()
+                        .unwrap_or_default()
+                        .join(".local")
+                        .join("share")
                 })
         };
         data_dir.join("opencode").join("opencode.db")
     };
 
-    if !opencode_db.exists() { return result; }
+    if !opencode_db.exists() {
+        return result;
+    }
 
     let conn = match Connection::open_with_flags(
         &opencode_db,

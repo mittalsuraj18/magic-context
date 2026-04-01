@@ -7,6 +7,7 @@ import type {
   SessionFact,
   SessionNote,
   SessionMetaRow,
+  ContextTokenBreakdown,
   DreamQueueEntry,
   DreamStateEntry,
   LogEntry,
@@ -89,6 +90,12 @@ export async function getSessionMeta(
   sessionId: string
 ): Promise<SessionMetaRow | null> {
   return invoke("get_session_meta", { sessionId });
+}
+
+export async function getContextTokenBreakdown(
+  sessionId: string
+): Promise<ContextTokenBreakdown | null> {
+  return invoke("get_context_token_breakdown", { sessionId });
 }
 
 export async function getSessionCacheStats(
