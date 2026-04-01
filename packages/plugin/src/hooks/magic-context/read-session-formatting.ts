@@ -50,6 +50,59 @@ export function extractTexts(parts: unknown[]): string[] {
     return texts;
 }
 
+/** Extract compact tool-call summaries from message parts.
+ *  Returns lines like "TC: Fix lint errors" or "TC: read(src/index.ts)". */
+export function extractToolCallSummaries(parts: unknown[]): string[] {
+    const summaries: string[] = [];
+    for (const part of parts) {
+        if (part === null || typeof part !== "object") continue;
+        const p = part as Record<string, unknown>;
+        if (p.type !== "tool" || typeof p.tool !== "string") continue;
+
+        const state = p.state as Record<string, unknown> | null;
+        if (!state || typeof state !== "object") continue;
+        const input = state.input as Record<string, unknown> | null;
+        const metadata = state.metadata as Record<string, unknown> | null;
+
+        // Prefer explicit description (bash tool always has one)
+        const description =
+            (input && typeof input.description === "string" && input.description) ||
+            (metadata && typeof metadata.description === "string" && metadata.description);
+        if (description) {
+            summaries.push(`TC: ${description}`);
+            continue;
+        }
+
+        // Fall back to tool_name(key_arg) for common tools
+        const toolName = p.tool as string;
+        const keyArg = extractKeyArg(toolName, input);
+        summaries.push(keyArg ? `TC: ${toolName}(${keyArg})` : `TC: ${toolName}`);
+    }
+    return summaries;
+}
+
+function extractKeyArg(_toolName: string, input: Record<string, unknown> | null): string | null {
+    if (!input) return null;
+    // File-oriented tools: show the path
+    if (typeof input.filePath === "string") return truncateArg(input.filePath);
+    if (typeof input.path === "string") return truncateArg(input.path);
+    // Search tools: show the pattern/query
+    if (typeof input.pattern === "string") return truncateArg(input.pattern);
+    if (typeof input.query === "string") return truncateArg(input.query);
+    // Symbol tools
+    if (typeof input.symbol === "string") return input.symbol;
+    // Module tools
+    if (typeof input.module === "string") return input.module;
+    // Memory/note tools: show the action
+    if (typeof input.action === "string") return input.action;
+    return null;
+}
+
+function truncateArg(value: string, maxLen = 60): string {
+    if (value.length <= maxLen) return value;
+    return `${value.slice(0, maxLen)}…`;
+}
+
 export function estimateTokens(text: string): number {
     return Math.ceil(text.length / 3.5);
 }

@@ -7,6 +7,7 @@ import {
     compactTextForSummary,
     estimateTokens,
     extractTexts,
+    extractToolCallSummaries,
     formatBlock,
     hasMeaningfulUserText,
     mergeCommitHashes,
@@ -167,21 +168,50 @@ export function readSessionChunk(
 
         // Skip user messages that are pure system notifications (background task
         // completions, internal initiator markers, system directives). These carry
-        // zero signal for compartment summaries.
+        // zero signal for compartment summaries — unless they contain tool results
+        // with extractable descriptions.
         if (msg.role === "user" && !hasMeaningfulUserText(msg.parts)) {
-            pendingNoiseMeta.push(meta);
+            const tcSummaries = extractToolCallSummaries(msg.parts);
+            if (tcSummaries.length === 0) {
+                pendingNoiseMeta.push(meta);
+                continue;
+            }
+            // Tool-result-only user messages: merge TC summaries into the
+            // preceding assistant block (same "A" role since tool results follow
+            // assistant tool-use messages in the compacted flow).
+            const tcText = tcSummaries.join(" / ");
+            if (currentBlock && currentBlock.role === "A") {
+                currentBlock.endOrdinal = msg.ordinal;
+                currentBlock.parts.push(tcText);
+                currentBlock.meta.push(...pendingNoiseMeta, meta);
+                pendingNoiseMeta = [];
+            } else {
+                if (!flushCurrentBlock()) break;
+                currentBlock = {
+                    role: "A",
+                    startOrdinal: pendingNoiseMeta[0]?.ordinal ?? msg.ordinal,
+                    endOrdinal: msg.ordinal,
+                    parts: [tcText],
+                    meta: [...pendingNoiseMeta, meta],
+                    commitHashes: [],
+                };
+                pendingNoiseMeta = [];
+            }
             continue;
         }
 
         const role = compactRole(msg.role);
-        const compacted = compactTextForSummary(
-            extractTexts(msg.parts)
-                .map((t) => (msg.role === "user" ? cleanUserText(t) : t))
-                .map(normalizeText)
-                .filter((value) => value.length > 0)
-                .join(" / "),
-            msg.role,
-        );
+        const textParts = extractTexts(msg.parts)
+            .map((t) => (msg.role === "user" ? cleanUserText(t) : t))
+            .map(normalizeText)
+            .filter((value) => value.length > 0);
+
+        // For messages with no text content, extract tool-call descriptions as
+        // lightweight summaries so historian sees what actions were taken.
+        const toolSummaries = textParts.length === 0 ? extractToolCallSummaries(msg.parts) : [];
+        const allParts = [...textParts, ...toolSummaries];
+
+        const compacted = compactTextForSummary(allParts.join(" / "), msg.role);
         const text = compacted.text;
 
         if (!text) {

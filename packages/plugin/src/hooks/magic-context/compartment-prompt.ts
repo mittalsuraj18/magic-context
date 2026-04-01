@@ -69,8 +69,8 @@ Input notes:
 - [N] or [N-M] is a stable raw OpenCode message range.
 - U: means user.
 - A: means assistant.
+- TC: means tool call — a compact summary of what the agent did (e.g., "TC: Fix lint errors", "TC: read(src/index.ts)", "TC: grep(ctx_memory)"). TC lines appear when there is no text describing the action. Use them to understand what happened between text blocks, but do not copy them verbatim into compartments — incorporate their meaning into the narrative.
 - commits: ... on an assistant block lists commit hashes mentioned in that work unit; keep the relevant ones in the compartment summary when they matter.
-- Tool-only noise is already stripped before you see the input.
 
 Output valid XML only in this shape:
 <output>
