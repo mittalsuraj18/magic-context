@@ -35,7 +35,8 @@ export function enqueueDream(
     const now = Date.now();
     return db.transaction(() => {
         // Clean stale started entries before checking — prevents post-crash permanent "already queued"
-        const staleThresholdMs = 10 * 60 * 1000; // 10 minutes
+        // Use 2h threshold to avoid deleting entries for long-running dreams (max runtime is configurable, up to 120min)
+        const staleThresholdMs = 120 * 60 * 1000; // 2 hours
         db.run(
             "DELETE FROM dream_queue WHERE project_path = ? AND started_at IS NOT NULL AND started_at < ?",
             [projectIdentity, now - staleThresholdMs],

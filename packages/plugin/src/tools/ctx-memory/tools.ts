@@ -158,9 +158,7 @@ function createCtxMemoryTool(deps: CtxMemoryToolDeps): ToolDefinition {
     return tool({
         description: CTX_MEMORY_DESCRIPTION,
         args: {
-            action: tool.schema
-                .enum(CTX_MEMORY_DREAMER_ACTIONS)
-                .describe("Action to perform on memories"),
+            action: tool.schema.enum(allowedActions).describe("Action to perform on memories"),
             content: tool.schema
                 .string()
                 .optional()

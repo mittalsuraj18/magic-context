@@ -81,6 +81,7 @@ interface RunPostTransformPhaseArgs {
     watermark: number;
     forceMaterializationPercentage: number;
     hasRecentReduceCall: boolean;
+    projectPath?: string;
 }
 
 export function runPostTransformPhase(args: RunPostTransformPhaseArgs): void {
@@ -473,7 +474,12 @@ export function runPostTransformPhase(args: RunPostTransformPhaseArgs): void {
         }
     }
 
-    const deferredNoteText = peekNoteNudgeText(args.db, args.sessionId, args.currentTurnId);
+    const deferredNoteText = peekNoteNudgeText(
+        args.db,
+        args.sessionId,
+        args.currentTurnId,
+        args.projectPath,
+    );
     if (deferredNoteText) {
         const noteInstruction = `\n\n<instruction name="deferred_notes">${deferredNoteText}</instruction>`;
         const anchoredMessageId = appendReminderToLatestUserMessage(args.messages, noteInstruction);

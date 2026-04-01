@@ -29,16 +29,24 @@ function isRawPartRow(row: unknown): row is RawPartRow {
     return typeof candidate.message_id === "string" && typeof candidate.data === "string";
 }
 
-function parseJsonRecord(value: string): Record<string, unknown> {
-    const parsed = JSON.parse(value);
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error("Expected JSON object");
+function parseJsonRecord(value: string): Record<string, unknown> | null {
+    try {
+        const parsed = JSON.parse(value);
+        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+            return null;
+        }
+        return parsed as Record<string, unknown>;
+    } catch {
+        return null;
     }
-    return parsed as Record<string, unknown>;
 }
 
 function parseJsonUnknown(value: string): unknown {
-    return JSON.parse(value);
+    try {
+        return JSON.parse(value);
+    } catch {
+        return null;
+    }
 }
 
 export function readRawSessionMessagesFromDb(db: Database, sessionId: string): RawMessage[] {
@@ -63,8 +71,9 @@ export function readRawSessionMessagesFromDb(db: Database, sessionId: string): R
         partsByMessageId.set(part.message_id, list);
     }
 
-    return messageRows.map((row, index) => {
+    return messageRows.flatMap((row, index) => {
         const info = parseJsonRecord(row.data);
+        if (!info) return [];
         const role = typeof info.role === "string" ? info.role : "unknown";
         return {
             ordinal: index + 1,

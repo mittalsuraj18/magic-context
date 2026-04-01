@@ -46,12 +46,15 @@ export function isInScheduleWindow(schedule: string, now: Date = new Date()): bo
     return currentMinutes >= window.startMinutes || currentMinutes < window.endMinutes;
 }
 
-/** Find projects that have memory updates since their per-project last dream time. */
+/** Find projects that have memory updates or pending smart notes since their per-project last dream time. */
 export function findProjectsNeedingDream(db: Database): string[] {
-    // Get all active project paths
+    // Get all active project paths from memories and smart notes
     const projectRows = db
         .query<{ project_path: string }, []>(
-            `SELECT DISTINCT project_path FROM memories WHERE status = 'active' ORDER BY project_path`,
+            `SELECT DISTINCT project_path FROM memories WHERE status = 'active'
+             UNION
+             SELECT DISTINCT project_path FROM smart_notes WHERE status = 'pending'
+             ORDER BY project_path`,
         )
         .all();
 
@@ -62,14 +65,24 @@ export function findProjectsNeedingDream(db: Database): string[] {
         const fallbackStr = !lastDreamAtStr ? getDreamState(db, "last_dream_at") : null;
         const lastDreamAt = Number(lastDreamAtStr ?? fallbackStr ?? "0") || 0;
 
-        const updated = db
+        const updatedMemories = db
             .query<{ cnt: number }, [string, number]>(
                 `SELECT COUNT(*) as cnt FROM memories
                  WHERE project_path = ? AND status = 'active' AND updated_at > ?`,
             )
             .get(row.project_path, lastDreamAt);
 
-        if (updated && updated.cnt > 0) {
+        const pendingSmartNotes = db
+            .query<{ cnt: number }, [string]>(
+                `SELECT COUNT(*) as cnt FROM smart_notes
+                 WHERE project_path = ? AND status = 'pending'`,
+            )
+            .get(row.project_path);
+
+        if (
+            (updatedMemories && updatedMemories.cnt > 0) ||
+            (pendingSmartNotes && pendingSmartNotes.cnt > 0)
+        ) {
             projects.push(row.project_path);
         }
     }

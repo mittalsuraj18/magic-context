@@ -73,6 +73,7 @@ export interface TransformDeps {
         sessionId: string,
     ) => import("./send-session-notification").NotificationParams;
     getModelKey?: (sessionId: string) => string | undefined;
+    projectPath?: string;
 }
 
 export function createTransform(deps: TransformDeps) {
@@ -313,6 +314,7 @@ export function createTransform(deps: TransformDeps) {
             watermark,
             forceMaterializationPercentage: FORCE_MATERIALIZE_PERCENTAGE,
             hasRecentReduceCall,
+            projectPath: deps.projectPath,
         });
 
         const elapsed = (performance.now() - startTime).toFixed(1);

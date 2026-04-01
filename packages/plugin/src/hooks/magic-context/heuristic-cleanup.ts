@@ -128,7 +128,8 @@ export function applyHeuristicCleanup(
                 for (let i = 0; i < group.length - 1; i++) {
                     const tag = group[i];
                     const target = targets.get(tag.tagNumber);
-                    target?.drop?.();
+                    const dropResult = target?.drop?.() ?? "absent";
+                    if (dropResult === "incomplete") continue;
                     updateTagStatus(db, sessionId, tag.tagNumber, "dropped");
                     deduplicatedTools++;
                 }

@@ -391,8 +391,9 @@ Only include notes whose conditions you could definitively evaluate. Skip notes 
         const output = extractLatestAssistantText(messages);
         if (!output) throw new Error("Smart note evaluation returned no output.");
 
-        // Parse the JSON results from the LLM response
-        const jsonMatch = output.match(/\[[\s\S]*?\]/);
+        // Parse the JSON results from the LLM response — use greedy match to handle
+        // `]` chars inside JSON string values (e.g., reasons containing brackets).
+        const jsonMatch = output.match(/\[[\s\S]*\]/);
         if (!jsonMatch) {
             log("[dreamer] smart notes: no JSON array found in output, skipping");
             // Still mark all as checked
@@ -400,11 +401,14 @@ Only include notes whose conditions you could definitively evaluate. Skip notes 
             return;
         }
 
-        const evaluations = JSON.parse(jsonMatch[0]) as Array<{
-            id: number;
-            met: boolean;
-            reason?: string;
-        }>;
+        let evaluations: Array<{ id: number; met: boolean; reason?: string }>;
+        try {
+            evaluations = JSON.parse(jsonMatch[0]);
+        } catch {
+            log(`[dreamer] smart notes: failed to parse JSON from LLM output, marking all checked`);
+            for (const note of pendingNotes) markSmartNoteChecked(args.db, note.id);
+            return;
+        }
         let surfaced = 0;
         let checked = 0;
         for (const evaluation of evaluations) {

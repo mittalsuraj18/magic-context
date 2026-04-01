@@ -191,6 +191,7 @@ export function createMagicContextHook(deps: MagicContextDeps) {
             const model = liveModelBySession.get(sessionId);
             return resolveModelKey(model?.providerID, model?.modelID);
         },
+        projectPath,
     });
     const eventHandler = createEventHandler({
         contextUsageMap,
@@ -216,9 +217,9 @@ export function createMagicContextHook(deps: MagicContextDeps) {
             return;
         }
 
-        lastScheduleCheckMs = now;
         try {
             checkScheduleAndEnqueue(db, dreaming.schedule);
+            lastScheduleCheckMs = now;
         } catch (error) {
             log("[dreamer] scheduled enqueue check failed:", error);
             return;
