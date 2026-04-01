@@ -12,6 +12,7 @@ import type {
   DreamStateEntry,
   LogEntry,
   CacheEvent,
+  DbCacheEvent,
   ConfigFile,
   DbHealth,
 } from "./types";
@@ -104,6 +105,12 @@ export async function getSessionCacheStats(
   return invoke("get_session_cache_stats", { maxLines: 5000, limit: limit ?? 5 });
 }
 
+export async function getSessionCacheStatsFromDb(
+  limit?: number
+): Promise<import("./types").SessionCacheStats[]> {
+  return invoke("get_session_cache_stats_from_db", { limit: limit ?? 5 });
+}
+
 // ── Dreamer API ─────────────────────────────────────────────
 
 export async function getDreamQueue(): Promise<DreamQueueEntry[]> {
@@ -133,6 +140,12 @@ export async function getCacheEvents(
   maxLines?: number
 ): Promise<CacheEvent[]> {
   return invoke("get_cache_events", { maxLines: maxLines ?? 2000 });
+}
+
+export async function getCacheEventsFromDb(
+  limit?: number
+): Promise<DbCacheEvent[]> {
+  return invoke("get_cache_events_from_db", { limit: limit ?? 200 });
 }
 
 // ── Config API ──────────────────────────────────────────────

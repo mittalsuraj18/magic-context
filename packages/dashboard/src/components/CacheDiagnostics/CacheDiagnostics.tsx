@@ -1,10 +1,9 @@
 import { createSignal, For, Show, onCleanup, onMount } from "solid-js";
-import type { CacheEvent, SessionCacheStats } from "../../lib/types";
-import { getCacheEvents, getSessionCacheStats, getSessions } from "../../lib/api";
-import { truncate } from "../../lib/api";
+import type { DbCacheEvent, SessionCacheStats } from "../../lib/types";
+import { formatDateTime, getCacheEventsFromDb, getSessionCacheStatsFromDb, getSessions, truncate } from "../../lib/api";
 
 export default function CacheDiagnostics() {
-  const [events, setEvents] = createSignal<CacheEvent[]>([]);
+  const [events, setEvents] = createSignal<DbCacheEvent[]>([]);
   const [sessionStats, setSessionStats] = createSignal<SessionCacheStats[]>([]);
   const [sessionNames, setSessionNames] = createSignal<Record<string, string>>({});
   const [loading, setLoading] = createSignal(true);
@@ -16,8 +15,8 @@ export default function CacheDiagnostics() {
   const fetchData = async () => {
     try {
       const [eventsData, statsData, sessions] = await Promise.all([
-        getCacheEvents(2000),
-        getSessionCacheStats(20),
+        getCacheEventsFromDb(200),
+        getSessionCacheStatsFromDb(20),
         getSessions(),
       ]);
       setEvents(eventsData);
@@ -43,7 +42,7 @@ export default function CacheDiagnostics() {
 
   const refreshInterval = setInterval(() => {
     if (!paused()) fetchData();
-  }, 5000);
+  }, 15000);
   onCleanup(() => clearInterval(refreshInterval));
 
   const isSubagent = (sessionId: string) => subagentIds().has(sessionId);
@@ -170,7 +169,7 @@ export default function CacheDiagnostics() {
                   <div
                     class={`chart-bar ${event.hit_ratio === 0 ? "black" : severityBarClass(event.hit_ratio)}`}
                     style={{ height: `${Math.max(3, event.hit_ratio * 100)}%` }}
-                    title={`${event.timestamp}\nHit: ${(event.hit_ratio * 100).toFixed(1)}%\nPrompt: ${(event.cache_read + event.cache_write + event.input_tokens).toLocaleString()}\nCached: ${event.cache_read.toLocaleString()}\nNew: ${event.cache_write.toLocaleString()}\nUncached: ${event.input_tokens.toLocaleString()}${event.cause ? `\nCause: ${event.cause}` : ""}`}
+                    title={`${formatDateTime(event.timestamp)}\nHit: ${(event.hit_ratio * 100).toFixed(1)}%\nPrompt: ${(event.cache_read + event.cache_write + event.input_tokens).toLocaleString()}\nCached: ${event.cache_read.toLocaleString()}\nNew: ${event.cache_write.toLocaleString()}\nUncached: ${event.input_tokens.toLocaleString()}${event.cause ? `\nCause: ${event.cause}` : ""}`}
                   />
                 )}
               </For>
@@ -192,7 +191,7 @@ export default function CacheDiagnostics() {
                 <span class="empty-state-icon">📊</span>
                 <span>No cache events found</span>
                 <span style={{ "font-size": "11px" }}>
-                  Cache data is parsed from /tmp/magic-context.log
+                  Cache data is read from OpenCode DB
                 </span>
               </div>
             }
@@ -206,7 +205,7 @@ export default function CacheDiagnostics() {
                       <div style={{ display: "flex", "align-items": "center", gap: "8px", "margin-bottom": "4px" }}>
                         <span>{severityIcon(event.severity)}</span>
                         <span class="mono" style={{ "font-size": "11px", color: "var(--text-secondary)" }}>
-                          {event.timestamp.split("T").pop()?.split(".")[0] ?? event.timestamp}
+                          {formatDateTime(event.timestamp)}
                         </span>
                         <span class={`pill ${event.severity === "stable" ? "green" : event.severity === "info" ? "blue" : event.severity === "warning" ? "amber" : "red"}`}>
                           {event.severity === "full_bust" ? "FULL BUST" : event.severity === "info" ? "NEW SESSION" : event.severity.toUpperCase()}

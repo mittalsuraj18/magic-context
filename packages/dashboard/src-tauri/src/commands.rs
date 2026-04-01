@@ -182,6 +182,16 @@ pub fn get_session_cache_stats(max_lines: Option<usize>, limit: Option<usize>) -
     log_parser::aggregate_session_cache_stats(&events, limit.unwrap_or(5))
 }
 
+#[tauri::command]
+pub fn get_cache_events_from_db(limit: Option<usize>) -> Vec<db::DbCacheEvent> {
+    db::get_cache_events_from_db(limit.unwrap_or(200))
+}
+
+#[tauri::command]
+pub fn get_session_cache_stats_from_db(limit: Option<usize>) -> Vec<db::SessionCacheStats> {
+    db::get_session_cache_stats_from_db(limit.unwrap_or(5))
+}
+
 // ── Config commands ─────────────────────────────────────────
 
 #[tauri::command]

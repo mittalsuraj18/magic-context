@@ -1,5 +1,6 @@
 use rusqlite::Connection;
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 pub fn resolve_db_path() -> Option<PathBuf> {
@@ -24,6 +25,27 @@ pub fn resolve_db_path() -> Option<PathBuf> {
         .join("plugin")
         .join("magic-context")
         .join("context.db");
+    if db_path.exists() {
+        Some(db_path)
+    } else {
+        None
+    }
+}
+
+pub fn resolve_opencode_db_path() -> Option<PathBuf> {
+    let data_dir = if cfg!(target_os = "windows") {
+        dirs::data_dir()?
+    } else {
+        std::env::var("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                dirs::home_dir()
+                    .unwrap_or_default()
+                    .join(".local")
+                    .join("share")
+            })
+    };
+    let db_path = data_dir.join("opencode").join("opencode.db");
     if db_path.exists() {
         Some(db_path)
     } else {
@@ -192,6 +214,54 @@ pub struct ContextTokenBreakdown {
     pub memory_count: i64,
 }
 
+// ── Cache diagnostics ─────────────────────────────────────────
+
+#[derive(Debug, Serialize, Clone)]
+pub struct DbCacheEvent {
+    pub message_id: String,
+    pub session_id: String,
+    pub timestamp: i64,
+    pub input_tokens: i64,
+    pub cache_read: i64,
+    pub cache_write: i64,
+    pub total_tokens: i64,
+    pub hit_ratio: f64,
+    pub severity: String,
+    pub cause: Option<String>,
+    pub agent: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct SessionCacheStats {
+    pub session_id: String,
+    pub event_count: usize,
+    pub total_cache_read: i64,
+    pub total_cache_write: i64,
+    pub total_input: i64,
+    pub hit_ratio: f64,
+    pub last_timestamp: String,
+    pub bust_count: usize,
+}
+
+#[derive(Debug, Clone)]
+struct RawDbCacheEvent {
+    message_id: String,
+    session_id: String,
+    timestamp: i64,
+    input_tokens: i64,
+    cache_read: i64,
+    cache_write: i64,
+    total_tokens: i64,
+    agent: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct LogCauseCandidate {
+    session_id: String,
+    timestamp: i64,
+    cause: String,
+}
+
 /// Estimate tokens using ~4 chars per token (CHARS_PER_TOKEN_ESTIMATE = 4)
 fn estimate_tokens(chars: i64) -> i64 {
     (chars + 3) / 4 // Round up
@@ -312,6 +382,272 @@ fn normalize_hash(content: &str) -> String {
     format!("{:032x}", digest)
 }
 
+fn format_timestamp_iso(timestamp: i64) -> String {
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(timestamp)
+        .map(|dt| dt.to_rfc3339())
+        .unwrap_or_else(|| timestamp.to_string())
+}
+
+fn parse_log_timestamp_millis(timestamp: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(timestamp)
+        .map(|dt| dt.timestamp_millis())
+        .ok()
+}
+
+fn detect_log_cache_cause(
+    entries: &[crate::log_parser::LogEntry],
+    event_idx: usize,
+) -> Option<String> {
+    let event = &entries[event_idx];
+    let window_start = event_idx.saturating_sub(10);
+    let window_end = std::cmp::min(event_idx + 4, entries.len());
+    let mut causes = Vec::new();
+
+    for entry in &entries[window_start..window_end] {
+        if entry.session_id != event.session_id {
+            continue;
+        }
+
+        let msg = &entry.message;
+        if msg.contains("Execute pass") || (msg.contains("applied") && msg.contains("ops")) {
+            causes.push("Execute pass".to_string());
+        }
+        if msg.contains("compartments") && msg.contains("→") {
+            causes.push("Historian output".to_string());
+        }
+        if msg.contains("variant change") || msg.contains("Variant change") {
+            causes.push("Variant change".to_string());
+        }
+        if msg.contains("system prompt hash") {
+            causes.push("System prompt hash change".to_string());
+        }
+        if msg.contains("heuristic cleanup") || msg.contains("tool tags dropped") {
+            causes.push("Heuristic cleanup".to_string());
+        }
+    }
+
+    causes.dedup();
+    if causes.is_empty() {
+        None
+    } else {
+        Some(causes.join(", "))
+    }
+}
+
+fn build_log_cause_candidates() -> Vec<LogCauseCandidate> {
+    let log_path = crate::log_parser::resolve_log_path();
+    let entries = crate::log_parser::read_log_tail(&log_path, 5000);
+
+    entries
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, entry)| {
+            if entry.session_id.is_empty() || entry.cache_read.is_none() || entry.cache_write.is_none() {
+                return None;
+            }
+
+            let timestamp = parse_log_timestamp_millis(&entry.timestamp)?;
+            let cause = detect_log_cache_cause(&entries, idx)?;
+
+            Some(LogCauseCandidate {
+                session_id: entry.session_id.clone(),
+                timestamp,
+                cause,
+            })
+        })
+        .collect()
+}
+
+fn match_log_cause(
+    candidates: &[LogCauseCandidate],
+    session_id: &str,
+    timestamp: i64,
+) -> Option<String> {
+    let mut matches: Vec<(i64, &str)> = candidates
+        .iter()
+        .filter(|candidate| candidate.session_id == session_id)
+        .filter_map(|candidate| {
+            let distance = (candidate.timestamp - timestamp).abs();
+            if distance <= 5_000 {
+                Some((distance, candidate.cause.as_str()))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    matches.sort_by_key(|(distance, _)| *distance);
+
+    let mut deduped = Vec::new();
+    for (_, cause) in matches {
+        if !deduped.iter().any(|existing: &String| existing == cause) {
+            deduped.push(cause.to_string());
+        }
+    }
+
+    if deduped.is_empty() {
+        None
+    } else {
+        Some(deduped.join(", "))
+    }
+}
+
+fn load_raw_db_cache_events(limit: usize) -> Result<Vec<RawDbCacheEvent>, rusqlite::Error> {
+    let Some(opencode_db_path) = resolve_opencode_db_path() else {
+        return Ok(Vec::new());
+    };
+
+    let conn = open_readonly(&opencode_db_path)?;
+    let mut stmt = conn.prepare(
+        "SELECT CAST(m.id AS TEXT), m.session_id, m.time_created,
+                COALESCE(CAST(json_extract(m.data, '$.tokens.input') AS INTEGER), 0) AS input_tokens,
+                COALESCE(CAST(json_extract(m.data, '$.tokens.cache.read') AS INTEGER), 0) AS cache_read,
+                COALESCE(CAST(json_extract(m.data, '$.tokens.cache.write') AS INTEGER), 0) AS cache_write,
+                COALESCE(CAST(json_extract(m.data, '$.tokens.total') AS INTEGER), 0) AS total_tokens,
+                CAST(json_extract(m.data, '$.agent') AS TEXT) AS agent
+         FROM message m
+         WHERE json_extract(m.data, '$.role') = 'assistant'
+           AND COALESCE(CAST(json_extract(m.data, '$.tokens.total') AS INTEGER), 0) > 0
+         ORDER BY m.time_created DESC
+         LIMIT ?1",
+    )?;
+
+    let rows = stmt.query_map([limit as i64], |row| {
+        Ok(RawDbCacheEvent {
+            message_id: row.get(0)?,
+            session_id: row.get(1)?,
+            timestamp: row.get(2)?,
+            input_tokens: row.get(3)?,
+            cache_read: row.get(4)?,
+            cache_write: row.get(5)?,
+            total_tokens: row.get(6)?,
+            agent: row.get(7)?,
+        })
+    })?;
+
+    rows.collect()
+}
+
+fn build_db_cache_events(rows: Vec<RawDbCacheEvent>, enrich_causes: bool) -> Vec<DbCacheEvent> {
+    let log_cause_candidates = if enrich_causes { build_log_cause_candidates() } else { Vec::new() };
+    let mut seen_sessions = HashSet::new();
+    let mut chronological = Vec::with_capacity(rows.len());
+
+    for row in rows.into_iter().rev() {
+        let total_prompt = row.input_tokens + row.cache_read + row.cache_write;
+        let hit_ratio = if total_prompt > 0 {
+            row.cache_read as f64 / total_prompt as f64
+        } else {
+            0.0
+        };
+
+        let is_first_session_event = seen_sessions.insert(row.session_id.clone());
+        let (severity, cause) = if is_first_session_event {
+            (
+                "info".to_string(),
+                Some("First message (new session)".to_string()),
+            )
+        } else if row.cache_read == 0 && row.cache_write > 0 {
+            (
+                "full_bust".to_string(),
+                match_log_cause(&log_cause_candidates, &row.session_id, row.timestamp),
+            )
+        } else if hit_ratio < 0.5 {
+            (
+                "bust".to_string(),
+                match_log_cause(&log_cause_candidates, &row.session_id, row.timestamp),
+            )
+        } else if hit_ratio < 0.9 {
+            (
+                "warning".to_string(),
+                if enrich_causes { match_log_cause(&log_cause_candidates, &row.session_id, row.timestamp) } else { None },
+            )
+        } else {
+            ("stable".to_string(), None)
+        };
+
+        chronological.push(DbCacheEvent {
+            message_id: row.message_id,
+            session_id: row.session_id,
+            timestamp: row.timestamp,
+            input_tokens: row.input_tokens,
+            cache_read: row.cache_read,
+            cache_write: row.cache_write,
+            total_tokens: row.total_tokens,
+            hit_ratio,
+            severity,
+            cause,
+            agent: row.agent,
+        });
+    }
+
+    chronological
+}
+
+pub fn get_cache_events_from_db(limit: usize) -> Vec<DbCacheEvent> {
+    load_raw_db_cache_events(limit)
+        .map(|rows| build_db_cache_events(rows, true))
+        .unwrap_or_default()
+}
+
+pub fn get_session_cache_stats_from_db(limit: usize) -> Vec<SessionCacheStats> {
+    // Reuse raw rows instead of re-querying + re-parsing logs
+    let events = load_raw_db_cache_events(200)
+        .map(|rows| build_db_cache_events(rows, false)) // skip log enrichment for stats
+        .unwrap_or_default();
+    let mut map: HashMap<String, (usize, i64, i64, i64, i64, usize)> = HashMap::new();
+
+    for event in events {
+        if event.session_id.is_empty() {
+            continue;
+        }
+
+        let entry = map
+            .entry(event.session_id.clone())
+            .or_insert((0, 0, 0, 0, event.timestamp, 0));
+        entry.0 += 1;
+        entry.1 += event.cache_read;
+        entry.2 += event.cache_write;
+        entry.3 += event.input_tokens;
+        entry.4 = entry.4.max(event.timestamp);
+        if event.severity == "bust" || event.severity == "full_bust" {
+            entry.5 += 1;
+        }
+    }
+
+    let mut stats: Vec<(i64, SessionCacheStats)> = map
+        .into_iter()
+        .map(
+            |(session_id, (event_count, total_cache_read, total_cache_write, total_input, last_timestamp, bust_count))| {
+                let total_prompt = total_cache_read + total_cache_write + total_input;
+                let hit_ratio = if total_prompt > 0 {
+                    total_cache_read as f64 / total_prompt as f64
+                } else {
+                    0.0
+                };
+
+                (
+                    last_timestamp,
+                    SessionCacheStats {
+                        session_id,
+                        event_count,
+                        total_cache_read,
+                        total_cache_write,
+                        total_input,
+                        hit_ratio,
+                        last_timestamp: format_timestamp_iso(last_timestamp),
+                        bust_count,
+                    },
+                )
+            },
+        )
+        .collect();
+
+    stats.sort_by(|a, b| b.0.cmp(&a.0));
+    stats.truncate(limit);
+    stats.into_iter().map(|(_, stat)| stat).collect()
+}
+
 // ── Project resolution ────────────────────────────────────────
 
 #[derive(Debug, Serialize, Clone)]
@@ -367,38 +703,13 @@ pub fn get_projects(conn: &Connection) -> Result<Vec<ProjectInfo>, rusqlite::Err
 fn resolve_from_opencode_db(
     identities: &[String],
 ) -> std::collections::HashMap<String, (String, String)> {
-    use std::collections::HashMap;
-
     let mut result = HashMap::new();
 
-    // Find the opencode.db path (same parent as our plugin storage)
-    let opencode_db = {
-        let data_dir = if cfg!(target_os = "windows") {
-            match dirs::data_dir() {
-                Some(d) => d,
-                None => return result,
-            }
-        } else {
-            std::env::var("XDG_DATA_HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| {
-                    dirs::home_dir()
-                        .unwrap_or_default()
-                        .join(".local")
-                        .join("share")
-                })
-        };
-        data_dir.join("opencode").join("opencode.db")
+    let Some(opencode_db) = resolve_opencode_db_path() else {
+        return result;
     };
 
-    if !opencode_db.exists() {
-        return result;
-    }
-
-    let conn = match Connection::open_with_flags(
-        &opencode_db,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ) {
+    let conn = match open_readonly(&opencode_db) {
         Ok(c) => c,
         Err(_) => return result,
     };
@@ -911,40 +1222,16 @@ pub fn get_sessions(conn: &Connection) -> Result<Vec<SessionSummary>, rusqlite::
 fn resolve_session_info(
     sessions: &[SessionSummary],
 ) -> std::collections::HashMap<String, (String, String)> {
-    use std::collections::HashMap;
-
     let mut result = HashMap::new();
     if sessions.is_empty() {
         return result;
     }
 
-    let opencode_db = {
-        let data_dir = if cfg!(target_os = "windows") {
-            match dirs::data_dir() {
-                Some(d) => d,
-                None => return result,
-            }
-        } else {
-            std::env::var("XDG_DATA_HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| {
-                    dirs::home_dir()
-                        .unwrap_or_default()
-                        .join(".local")
-                        .join("share")
-                })
-        };
-        data_dir.join("opencode").join("opencode.db")
+    let Some(opencode_db) = resolve_opencode_db_path() else {
+        return result;
     };
 
-    if !opencode_db.exists() {
-        return result;
-    }
-
-    let conn = match Connection::open_with_flags(
-        &opencode_db,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ) {
+    let conn = match open_readonly(&opencode_db) {
         Ok(c) => c,
         Err(_) => return result,
     };

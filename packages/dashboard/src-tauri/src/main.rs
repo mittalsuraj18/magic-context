@@ -58,6 +58,8 @@ fn main() {
             commands::get_log_entries,
             commands::get_cache_events,
             commands::get_session_cache_stats,
+            commands::get_cache_events_from_db,
+            commands::get_session_cache_stats_from_db,
             // Config
             commands::get_config,
             commands::save_config,

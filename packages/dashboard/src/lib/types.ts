@@ -158,6 +158,20 @@ export interface CacheEvent {
   severity: "stable" | "info" | "warning" | "bust" | "full_bust";
 }
 
+export interface DbCacheEvent {
+  message_id: string;
+  session_id: string;
+  timestamp: number;
+  input_tokens: number;
+  cache_read: number;
+  cache_write: number;
+  total_tokens: number;
+  hit_ratio: number;
+  severity: "stable" | "info" | "warning" | "bust" | "full_bust";
+  cause: string | null;
+  agent: string | null;
+}
+
 export interface SessionCacheStats {
   session_id: string;
   event_count: number;
