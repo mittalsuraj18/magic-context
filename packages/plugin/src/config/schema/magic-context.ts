@@ -136,8 +136,8 @@ export interface MagicContextConfig {
 
 export const MagicContextConfigSchema = z
     .object({
-        /** Enable magic context (default: false) */
-        enabled: z.boolean().default(false),
+        /** Enable magic context (default: true) */
+        enabled: z.boolean().default(true),
         /** When false, ctx_reduce tool is hidden, all nudges disabled, and prompt
          *  guidance about ctx_reduce stripped. Heuristic cleanup, compartments,
          *  memory, and other features still work. (default: true) */

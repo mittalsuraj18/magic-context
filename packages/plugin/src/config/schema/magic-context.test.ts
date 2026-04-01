@@ -15,7 +15,7 @@ describe("MagicContextConfigSchema", () => {
             const result = MagicContextConfigSchema.parse({});
 
             expect(result).toMatchObject({
-                enabled: false,
+                enabled: true,
                 cache_ttl: "5m",
                 nudge_interval_tokens: DEFAULT_NUDGE_INTERVAL_TOKENS,
                 execute_threshold_percentage: 65,
