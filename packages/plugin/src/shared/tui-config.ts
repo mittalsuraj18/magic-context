@@ -10,6 +10,7 @@ import { log } from "./logger";
 import { getOpenCodeConfigPaths } from "./opencode-config-dir";
 
 const PLUGIN_NAME = "@cortexkit/opencode-magic-context";
+const PLUGIN_ENTRY = `${PLUGIN_NAME}@latest`;
 
 function resolveTuiConfigPath(): string {
     const configDir = getOpenCodeConfigPaths({ binary: "opencode" }).configDir;
@@ -43,7 +44,7 @@ export function ensureTuiPluginEntry(): boolean {
             return false; // Already present
         }
 
-        plugins.push(PLUGIN_NAME);
+        plugins.push(PLUGIN_ENTRY);
         config.plugin = plugins;
 
         mkdirSync(dirname(configPath), { recursive: true });

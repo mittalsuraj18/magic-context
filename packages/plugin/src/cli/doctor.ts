@@ -8,6 +8,7 @@ import { isOpenCodeInstalled } from "./opencode-helpers";
 import { intro, log, outro } from "./prompts";
 
 const PLUGIN_NAME = "@cortexkit/opencode-magic-context";
+const PLUGIN_ENTRY_WITH_VERSION = `${PLUGIN_NAME}@latest`;
 
 export async function runDoctor(): Promise<number> {
     intro("Magic Context Doctor");
@@ -60,7 +61,7 @@ export async function runDoctor(): Promise<number> {
                 log.success(`Plugin registered in ${configName}`);
             } else {
                 // Auto-add plugin entry — preserves comments
-                const updatedPlugins = [...(plugins as unknown[]), PLUGIN_NAME];
+                const updatedPlugins = [...(plugins as unknown[]), PLUGIN_ENTRY_WITH_VERSION];
                 config.plugin = updatedPlugins;
                 writeFileSync(paths.opencodeConfig, `${stringify(config, null, 2)}\n`);
                 log.success(`Added plugin to ${configName}`);

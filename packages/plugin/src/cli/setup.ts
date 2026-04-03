@@ -13,6 +13,7 @@ import {
 import { confirm, intro, log, note, outro, selectOne, spinner } from "./prompts";
 
 const PLUGIN_NAME = "@cortexkit/opencode-magic-context";
+const PLUGIN_ENTRY = "@cortexkit/opencode-magic-context@latest";
 
 // ─── Helpers ──────────────────────────────────────────────
 
@@ -38,7 +39,7 @@ function addPluginToOpenCodeConfig(configPath: string, format: "json" | "jsonc" 
 
     if (format === "none") {
         const config = {
-            plugin: [PLUGIN_NAME],
+            plugin: [PLUGIN_ENTRY],
             compaction: { auto: false, prune: false },
         };
         writeFileSync(configPath, `${stringifyJsonc(config, null, 2)}\n`);
@@ -56,7 +57,7 @@ function addPluginToOpenCodeConfig(configPath: string, format: "json" | "jsonc" 
     const plugins = (existing.plugin as string[]) ?? [];
     const hasPlugin = plugins.some((p) => p === PLUGIN_NAME || p.startsWith(`${PLUGIN_NAME}@`));
     if (!hasPlugin) {
-        plugins.push(PLUGIN_NAME);
+        plugins.push(PLUGIN_ENTRY);
     }
     existing.plugin = plugins;
 
@@ -73,7 +74,7 @@ function addPluginToTuiConfig(configPath: string, format: "json" | "jsonc" | "no
     ensureDir(dirname(configPath));
 
     if (format === "none") {
-        writeFileSync(configPath, `${stringifyJsonc({ plugin: [PLUGIN_NAME] }, null, 2)}\n`);
+        writeFileSync(configPath, `${stringifyJsonc({ plugin: [PLUGIN_ENTRY] }, null, 2)}\n`);
         return;
     }
 
@@ -86,7 +87,7 @@ function addPluginToTuiConfig(configPath: string, format: "json" | "jsonc" | "no
     const plugins = (existing.plugin as string[]) ?? [];
     const hasPlugin = plugins.some((p) => p === PLUGIN_NAME || p.startsWith(`${PLUGIN_NAME}@`));
     if (!hasPlugin) {
-        plugins.push(PLUGIN_NAME);
+        plugins.push(PLUGIN_ENTRY);
     }
 
     existing.plugin = plugins;

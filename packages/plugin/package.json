@@ -28,6 +28,7 @@
   "files": [
     "dist",
     "src/tui",
+    "src/shared",
     "README.md"
   ],
   "scripts": {
