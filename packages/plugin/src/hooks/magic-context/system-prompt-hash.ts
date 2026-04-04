@@ -9,10 +9,13 @@ import {
     getOrCreateSessionMeta,
     updateSessionMeta,
 } from "../../features/magic-context/storage";
+import { getActiveUserMemories } from "../../features/magic-context/user-memory/storage-user-memory";
 import { log, sessionLog } from "../../shared/logger";
 
 const MAGIC_CONTEXT_MARKER = "## Magic Context";
 const PROJECT_DOCS_MARKER = "<project-docs>";
+const USER_PROFILE_MARKER = "<user-profile>";
+const cachedUserProfileBySession = new Map<string, string | null>();
 
 const DOC_FILES = ["ARCHITECTURE.md", "STRUCTURE.md"] as const;
 
@@ -66,6 +69,8 @@ export function createSystemPromptHashHandler(deps: {
     directory: string;
     flushedSessions: Set<string>;
     lastHeuristicsTurnId: Map<string, string>;
+    /** When true, inject stable user memories as <user-profile> into system prompt */
+    experimentalUserMemories?: boolean;
 }): (input: { sessionID?: string }, output: { system: string[] }) => Promise<void> {
     // Per-session sticky date: we freeze the date string from the system prompt
     // and only update it on cache-busting passes. This prevents a midnight date
@@ -120,6 +125,32 @@ export function createSystemPromptHashHandler(deps: {
             const docsBlock = cachedDocsBySession.get(sessionId);
             if (docsBlock && !fullPrompt.includes(PROJECT_DOCS_MARKER)) {
                 output.system.push(docsBlock);
+            }
+        }
+
+        // ── Step 1.6: Inject stable user memories as user profile ──
+        if (deps.experimentalUserMemories) {
+            const hasCachedProfile = cachedUserProfileBySession.has(sessionId);
+
+            if (!hasCachedProfile || isCacheBusting) {
+                const memories = getActiveUserMemories(deps.db);
+                if (memories.length > 0) {
+                    const items = memories.map((m) => `- ${m.content}`).join("\n");
+                    cachedUserProfileBySession.set(
+                        sessionId,
+                        `${USER_PROFILE_MARKER}\n${items}\n</user-profile>`,
+                    );
+                    if (!hasCachedProfile) {
+                        sessionLog(sessionId, `loaded ${memories.length} user profile memorie(s)`);
+                    }
+                } else {
+                    cachedUserProfileBySession.set(sessionId, null);
+                }
+            }
+
+            const profileBlock = cachedUserProfileBySession.get(sessionId);
+            if (profileBlock && !fullPrompt.includes(USER_PROFILE_MARKER)) {
+                output.system.push(profileBlock);
             }
         }
 

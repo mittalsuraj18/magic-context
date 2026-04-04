@@ -70,11 +70,11 @@ function getDb(): Database | null {
         return cachedDb;
     }
     try {
-        // Open without readonly flag — WAL-mode DBs need read-write access to the
-        // -shm file even for read-only queries. We never write from the TUI process.
+        // Open read-write: WAL-mode DBs need write access to the -shm file,
+        // and the TUI writes to plugin_messages for the message bus.
         cachedDb = new Database(targetPath);
         cachedDb.exec("PRAGMA journal_mode = WAL");
-        cachedDb.exec("PRAGMA query_only = ON");
+        cachedDb.exec("PRAGMA busy_timeout = 3000");
         dbPath = targetPath;
         return cachedDb;
     } catch (err) {
@@ -233,7 +233,7 @@ export function loadSidebarSnapshot(sessionId: string, directory: string): Sideb
         try {
             const noteRow = db
                 .query<{ count: number }, [string]>(
-                    `SELECT COUNT(*) as count FROM notes WHERE session_id = ?`,
+                    `SELECT COUNT(*) as count FROM notes WHERE session_id = ? AND type = 'session' AND status = 'active'`,
                 )
                 .get(sessionId);
             sessionNoteCount = noteRow?.count ?? 0;
@@ -247,12 +247,12 @@ export function loadSidebarSnapshot(sessionId: string, directory: string): Sideb
             try {
                 const smartRow = db
                     .query<{ count: number }, [string]>(
-                        `SELECT COUNT(*) as count FROM smart_notes WHERE project_path = ? AND status = 'ready'`,
+                        `SELECT COUNT(*) as count FROM notes WHERE project_path = ? AND type = 'smart' AND status = 'ready'`,
                     )
                     .get(projectIdentity);
                 readySmartNoteCount = smartRow?.count ?? 0;
             } catch {
-                // smart_notes table may not exist
+                // notes table may not exist
             }
         }
 
@@ -581,4 +581,112 @@ function readMagicContextConfig(directory: string): Record<string, unknown> | nu
         }
     }
     return null;
+}
+
+/**
+ * Get compartment count for a session (used by recomp confirmation dialog).
+ */
+export function getCompartmentCount(sessionId: string): number {
+    const db = getDb();
+    if (!db) return 0;
+    try {
+        const row = db
+            .prepare("SELECT COUNT(*) as count FROM compartments WHERE session_id = ?")
+            .get(sessionId) as { count: number } | null;
+        return row?.count ?? 0;
+    } catch {
+        return 0;
+    }
+}
+
+/**
+ * Consume pending server→TUI messages from the plugin_messages table.
+ * Returns consumed messages and marks them as consumed.
+ */
+export interface TuiMessage {
+    id: number;
+    type: string;
+    payload: Record<string, unknown>;
+    sessionId: string | null;
+    createdAt: number;
+}
+
+export function consumeTuiMessages(): TuiMessage[] {
+    const db = getDb();
+    if (!db) return [];
+
+    try {
+        // Check if plugin_messages table exists (migration may not have run yet)
+        const tableCheck = db
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='plugin_messages'")
+            .get();
+        if (!tableCheck) return [];
+
+        const now = Date.now();
+        const rows = db
+            .prepare(
+                "SELECT id, type, payload, session_id, created_at FROM plugin_messages WHERE direction = 'server_to_tui' AND consumed_at IS NULL ORDER BY created_at ASC",
+            )
+            .all() as Array<{
+            id: number;
+            type: string;
+            payload: string;
+            session_id: string | null;
+            created_at: number;
+        }>;
+
+        if (rows.length === 0) return [];
+
+        const ids = rows.map((r) => r.id);
+        db.prepare(
+            `UPDATE plugin_messages SET consumed_at = ? WHERE id IN (${ids.map(() => "?").join(",")})`,
+        ).run(now, ...ids);
+
+        // Cleanup old messages
+        db.prepare("DELETE FROM plugin_messages WHERE created_at < ?").run(now - 5 * 60 * 1000);
+
+        return rows.map((r) => {
+            let payload: Record<string, unknown> = {};
+            try {
+                payload = JSON.parse(r.payload);
+            } catch {
+                // Intentional: malformed payload treated as empty
+            }
+            return {
+                id: r.id,
+                type: r.type,
+                payload,
+                sessionId: r.session_id,
+                createdAt: r.created_at,
+            };
+        });
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * Send a message from TUI to server via plugin_messages.
+ */
+export function sendMessageToServer(
+    type: string,
+    payload: Record<string, unknown>,
+    sessionId?: string,
+): boolean {
+    const db = getDb();
+    if (!db) return false;
+
+    try {
+        const tableCheck = db
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='plugin_messages'")
+            .get();
+        if (!tableCheck) return false;
+
+        db.prepare(
+            "INSERT INTO plugin_messages (direction, type, payload, session_id, created_at) VALUES (?, ?, ?, ?, ?)",
+        ).run("tui_to_server", type, JSON.stringify(payload), sessionId ?? null, Date.now());
+        return true;
+    } catch {
+        return false;
+    }
 }

@@ -39,6 +39,12 @@ Your agent should never stop working to manage its own context. Magic Context is
 
 **5.** TUI sidebar with live context breakdown, token usage, historian status, and memory counts — right inside the terminal.
 
+### 🧪 Experimental
+
+**Compaction Markers** — after historian compresses older messages, Magic Context injects a boundary into OpenCode's message table. OpenCode's built-in message loader stops at the boundary, so the transform processes only the live tail instead of the full session history. Dramatically reduces per-turn overhead on long sessions. Enable with `experimental.compaction_markers: true`.
+
+**User Memories** — historian extracts behavioral observations about you alongside its normal compartment output (communication style, expertise level, review focus, working patterns). Recurring observations are promoted by the dreamer to stable user memories that appear in all sessions via `<user-profile>`. Enable with `experimental.user_memories.enabled: true` (requires dreamer).
+
 ---
 
 ## Get Started
@@ -253,10 +259,19 @@ An optional background agent that maintains memory quality overnight:
 - **Improve** — rewrite verbose memories into terse operational form
 - **Maintain docs** — update ARCHITECTURE.md and STRUCTURE.md from codebase changes
 - **Evaluate smart notes** — check pending smart note conditions and surface ready notes
+- **Review user memories** (experimental) — promote recurring user behavior observations to stable memories
 
 The dreamer runs during a configurable schedule window and creates ephemeral OpenCode child sessions for each task. Since it runs during idle time (typically overnight), it works well with local models — even slower ones like `ollama/mlx-qwen3.5-27b-claude-4.6-opus-reasoning-distilled` are fine since there's no user waiting.
 
 When dreamer is enabled, ARCHITECTURE.md and STRUCTURE.md are automatically injected into the agent's system prompt (configurable via `inject_docs`). Content is cached per-session and refreshed on cache-busting passes.
+
+### User Memories (Experimental)
+
+When `experimental.user_memories.enabled` is set, historian extracts behavioral observations about the user alongside its normal compartment output — things like communication style, expertise level, review focus, and working patterns. These go into a candidate pool.
+
+During dreamer runs, a dedicated review pass checks candidates for recurring patterns across sessions. Observations that appear at least `promotion_threshold` times (default 3) are promoted to stable user memories and injected into all sessions via `<user-profile>` in the system prompt.
+
+Stable user memories are visible and manageable in the dashboard's User Memories page. Requires dreamer to be enabled for the promotion step.
 
 ### TUI Sidebar
 
@@ -322,9 +337,8 @@ All durable states live in a local SQLite database. If the database can't be ope
 | `source_contents` | Raw content snapshots for persisted reductions |
 | `compartments` | Historian-produced structured history blocks |
 | `session_facts` | Categorized durable facts from historian runs |
-| `session_notes` | Session-scoped `ctx_note` content |
+| `notes` | Unified session notes and project-scoped smart notes |
 | `session_meta` | Per-session state — usage, nudge flags, anchors |
-| `smart_notes` | Project-scoped smart notes with surface conditions |
 | `memories` | Cross-session persistent memories |
 | `memory_embeddings` | Embedding vectors for semantic search |
 | `dream_state` | Dreamer lease locking and task progress |
@@ -335,6 +349,8 @@ All durable states live in a local SQLite database. If the database can't be ope
 | `message_history_index` | Tracks last indexed ordinal per session for incremental FTS population |
 | `recomp_compartments` | Staging for `/ctx-recomp` partial progress |
 | `recomp_facts` | Staging for `/ctx-recomp` partial progress |
+| `user_memory_candidates` | User behavior observations from historian (experimental) |
+| `user_memories` | Promoted stable user memories injected into all sessions (experimental) |
 
 ---
 

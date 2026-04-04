@@ -34,7 +34,7 @@ export default function StatusBar(props: Props) {
           <span>{count("session_facts")} facts</span>
         </div>
         <div class="status-item">
-          <span>{count("session_notes")} notes</span>
+          <span>{count("notes")} notes</span>
         </div>
       </Show>
     </div>

@@ -62,6 +62,13 @@ describe("MagicContextConfigSchema", () => {
                     enabled: true,
                     min_clusters: 3,
                 },
+                experimental: {
+                    compaction_markers: false,
+                    user_memories: {
+                        enabled: false,
+                        promotion_threshold: 3,
+                    },
+                },
                 embedding: {
                     provider: "openai-compatible",
                     endpoint: "http://localhost:1234/v1",

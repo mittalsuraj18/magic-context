@@ -16,6 +16,7 @@ import { getErrorMessage } from "../../shared/error-message";
 import { sessionLog } from "../../shared/logger";
 import { parseCompartmentOutput } from "./compartment-parser";
 import { buildCompressorPrompt } from "./compartment-prompt";
+import { clearInjectionCache } from "./inject-compartments";
 import { estimateTokens } from "./read-session-formatting";
 
 const HISTORIAN_AGENT = "historian";
@@ -278,6 +279,8 @@ export async function runCompressionPassIfNeeded(deps: CompressorDeps): Promise<
             allCompartments,
             facts.map((f) => ({ category: f.category, content: f.content })),
         );
+        // Invalidate injection cache so next transform rebuilds <session-history>
+        clearInjectionCache(sessionId);
         incrementCompressionDepth(db, sessionId, originalStart, originalEnd);
 
         sessionLog(

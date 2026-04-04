@@ -266,6 +266,29 @@ It is useful when starting a new session. It's better to choose a fast and cheap
 
 ---
 
+## Experimental Features
+
+### `experimental_compaction_markers`
+
+| Key | Type | Default |
+|-----|------|---------|
+| `experimental.compaction_markers` | `boolean` | `false` |
+
+When enabled, after historian publishes compartments a compaction boundary is injected into OpenCode's message/part tables. This causes `filterCompacted` to stop at the boundary, dramatically reducing the number of messages processed per transform pass.
+
+### `experimental_user_memories`
+
+| Key | Type | Default |
+|-----|------|---------|
+| `experimental.user_memories.enabled` | `boolean` | `false` |
+| `experimental.user_memories.promotion_threshold` | `number` | `3` |
+
+When enabled, historian extracts behavioral observations about the user alongside compartments. These are stored as candidates and reviewed by dreamer during scheduled runs. Recurring patterns that appear across multiple historian runs are promoted to stable user memories, injected into all sessions via `<user-profile>` in the system prompt.
+
+**Requires dreamer to be enabled.** Without dreamer, candidates accumulate but are never promoted to stable memories. The `doctor` command warns about this misconfiguration.
+
+- `promotion_threshold`: minimum number of semantically similar candidate observations before dreamer considers promoting to a stable memory (2–20, default 3).
+
 ## Commands
 
 | Command | Description |
@@ -323,6 +346,14 @@ It is useful when starting a new session. It's better to choose a fast and cheap
     "model": "github-copilot/gpt-5.4",
     "fallback_models": ["anthropic/claude-sonnet-4-6"],
     "timeout_ms": 30000
+  },
+
+  "experimental": {
+    "compaction_markers": false,
+    "user_memories": {
+      "enabled": false,
+      "promotion_threshold": 3
+    }
   }
 }
 ```

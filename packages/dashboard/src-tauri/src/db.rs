@@ -157,11 +157,20 @@ pub struct SessionFact {
 }
 
 #[derive(Debug, Serialize, Clone)]
-pub struct SessionNote {
+pub struct Note {
     pub id: i64,
-    pub session_id: String,
+    #[serde(rename = "type")]
+    pub note_type: String,
+    pub status: String,
     pub content: String,
+    pub session_id: Option<String>,
+    pub project_path: Option<String>,
+    pub surface_condition: Option<String>,
     pub created_at: i64,
+    pub updated_at: i64,
+    pub last_checked_at: Option<i64>,
+    pub ready_at: Option<i64>,
+    pub ready_reason: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -213,6 +222,10 @@ pub struct DreamRun {
     pub smart_notes_pending: i64,
     pub memory_changes_json: Option<serde_json::Value>,
 }
+
+// ── Note types ────────────────────────────────────────────────
+// Unified Note struct replaces SessionNote and SmartNote
+// Both session notes (type='session') and smart notes (type='smart') are stored in the notes table
 
 // ── Context Token Breakdown ───────────────────────────────────
 
@@ -1283,7 +1296,7 @@ pub fn get_sessions(conn: &Connection) -> Result<Vec<SessionSummary>, rusqlite::
             SELECT session_id, COUNT(*) AS cnt FROM session_facts GROUP BY session_id
         ),
         note_stats AS (
-            SELECT session_id, COUNT(*) AS cnt FROM session_notes GROUP BY session_id
+            SELECT session_id, COUNT(*) AS cnt FROM notes WHERE type = 'session' AND status = 'active' GROUP BY session_id
         )
         SELECT
             sm.session_id,
@@ -1420,17 +1433,57 @@ pub fn get_session_facts(
 pub fn get_session_notes(
     conn: &Connection,
     session_id: &str,
-) -> Result<Vec<SessionNote>, rusqlite::Error> {
+) -> Result<Vec<Note>, rusqlite::Error> {
     let mut stmt = conn.prepare(
-        "SELECT id, session_id, content, created_at
-         FROM session_notes WHERE session_id = ?1 ORDER BY created_at DESC",
+        "SELECT id, type, status, content, session_id, project_path, surface_condition,
+                created_at, updated_at, last_checked_at, ready_at, ready_reason
+         FROM notes WHERE session_id = ?1 AND type = 'session' AND status = 'active'
+         ORDER BY created_at DESC",
     )?;
     let rows = stmt.query_map(rusqlite::params![session_id], |row| {
-        Ok(SessionNote {
+        Ok(Note {
             id: row.get(0)?,
-            session_id: row.get(1)?,
-            content: row.get(2)?,
-            created_at: row.get(3)?,
+            note_type: row.get(1)?,
+            status: row.get(2)?,
+            content: row.get(3)?,
+            session_id: row.get(4)?,
+            project_path: row.get(5)?,
+            surface_condition: row.get(6)?,
+            created_at: row.get(7)?,
+            updated_at: row.get(8)?,
+            last_checked_at: row.get(9)?,
+            ready_at: row.get(10)?,
+            ready_reason: row.get(11)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn get_smart_notes(
+    conn: &Connection,
+    project_path: &str,
+) -> Result<Vec<Note>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT id, type, status, content, session_id, project_path, surface_condition,
+                created_at, updated_at, last_checked_at, ready_at, ready_reason
+         FROM notes
+         WHERE project_path = ?1 AND type = 'smart' AND status != 'dismissed'
+         ORDER BY created_at ASC",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![project_path], |row| {
+        Ok(Note {
+            id: row.get(0)?,
+            note_type: row.get(1)?,
+            status: row.get(2)?,
+            content: row.get(3)?,
+            session_id: row.get(4)?,
+            project_path: row.get(5)?,
+            surface_condition: row.get(6)?,
+            created_at: row.get(7)?,
+            updated_at: row.get(8)?,
+            last_checked_at: row.get(9)?,
+            ready_at: row.get(10)?,
+            ready_reason: row.get(11)?,
         })
     })?;
     rows.collect()
@@ -1596,6 +1649,122 @@ pub fn enqueue_dream(
     Ok(conn.last_insert_rowid())
 }
 
+// ── User Memory types ───────────────────────────────────────
+
+#[derive(Debug, Serialize, Clone)]
+pub struct UserMemory {
+    pub id: i64,
+    pub content: String,
+    pub status: String,
+    pub promoted_at: Option<i64>,
+    pub source_candidate_ids: Option<serde_json::Value>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct UserMemoryCandidate {
+    pub id: i64,
+    pub content: String,
+    pub session_id: String,
+    pub source_compartment_start: Option<i64>,
+    pub source_compartment_end: Option<i64>,
+    pub created_at: i64,
+}
+
+// ── User Memory queries ──────────────────────────────────────
+
+pub fn get_user_memories(
+    conn: &Connection,
+    status_filter: Option<&str>,
+) -> Result<Vec<UserMemory>, rusqlite::Error> {
+    let mut conditions = Vec::new();
+    let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    if let Some(s) = status_filter {
+        params.push(Box::new(s.to_string()));
+        conditions.push(format!("status = ?{}", params.len()));
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+
+    let sql = format!(
+        "SELECT id, content, status, promoted_at, source_candidate_ids, created_at, updated_at
+         FROM user_memories
+         {}
+         ORDER BY created_at DESC",
+        where_clause
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+        params.iter().map(|p| p.as_ref()).collect();
+    let rows = stmt.query_map(param_refs.as_slice(), |row| {
+        let source_candidate_ids: Option<String> = row.get(4)?;
+        Ok(UserMemory {
+            id: row.get(0)?,
+            content: row.get(1)?,
+            status: row.get(2)?,
+            promoted_at: row.get(3)?,
+            source_candidate_ids: source_candidate_ids
+                .as_deref()
+                .map(|s| serde_json::from_str(s).ok())
+                .flatten(),
+            created_at: row.get(5)?,
+            updated_at: row.get(6)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn get_user_memory_candidates(conn: &Connection) -> Result<Vec<UserMemoryCandidate>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "SELECT id, content, session_id, source_compartment_start, source_compartment_end, created_at
+         FROM user_memory_candidates
+         ORDER BY created_at DESC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(UserMemoryCandidate {
+            id: row.get(0)?,
+            content: row.get(1)?,
+            session_id: row.get(2)?,
+            source_compartment_start: row.get(3)?,
+            source_compartment_end: row.get(4)?,
+            created_at: row.get(5)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn dismiss_user_memory(conn: &Connection, id: i64) -> Result<(), rusqlite::Error> {
+    let now = chrono::Utc::now().timestamp_millis();
+    conn.execute(
+        "UPDATE user_memories SET status = 'dismissed', updated_at = ?1 WHERE id = ?2",
+        rusqlite::params![now, id],
+    )?;
+    Ok(())
+}
+
+pub fn delete_user_memory(conn: &Connection, id: i64) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        "DELETE FROM user_memories WHERE id = ?1",
+        rusqlite::params![id],
+    )?;
+    Ok(())
+}
+
+pub fn delete_user_memory_candidate(conn: &Connection, id: i64) -> Result<(), rusqlite::Error> {
+    conn.execute(
+        "DELETE FROM user_memory_candidates WHERE id = ?1",
+        rusqlite::params![id],
+    )?;
+    Ok(())
+}
+
 // ── Database health ───────────────────────────────────────
 
 pub fn get_db_health(db_path: &PathBuf) -> DbHealth {
@@ -1620,7 +1789,7 @@ pub fn get_db_health(db_path: &PathBuf) -> DbHealth {
                 "memories",
                 "compartments",
                 "session_facts",
-                "session_notes",
+                "notes",
                 "session_meta",
                 "tags",
                 "pending_ops",

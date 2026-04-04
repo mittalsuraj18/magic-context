@@ -392,10 +392,37 @@ export function runPostTransformPhase(args: RunPostTransformPhaseArgs): void {
                     pendingUserTurnReminder.text,
                 );
                 if (!reinjected) {
-                    sessionLog(
-                        args.sessionId,
-                        `preserving sticky turn reminder anchor to avoid cache bust: messageId=${pendingUserTurnReminder.messageId}`,
-                    );
+                    if (isCacheBustingPass) {
+                        // Anchor message gone (compacted/deleted) — re-anchor to latest visible user message.
+                        const newAnchorId = appendReminderToLatestUserMessage(
+                            args.messages,
+                            pendingUserTurnReminder.text,
+                        );
+                        if (newAnchorId) {
+                            setPersistedStickyTurnReminder(
+                                args.db,
+                                args.sessionId,
+                                pendingUserTurnReminder.text,
+                                newAnchorId,
+                            );
+                            sessionLog(
+                                args.sessionId,
+                                `sticky turn reminder re-anchored: ${pendingUserTurnReminder.messageId} → ${newAnchorId}`,
+                            );
+                        } else {
+                            // No user message visible at all — clear the stale reminder.
+                            clearPersistedStickyTurnReminder(args.db, args.sessionId);
+                            sessionLog(
+                                args.sessionId,
+                                `sticky turn reminder cleared — anchor ${pendingUserTurnReminder.messageId} gone and no user message visible`,
+                            );
+                        }
+                    } else {
+                        sessionLog(
+                            args.sessionId,
+                            `preserving sticky turn reminder anchor to avoid cache bust: messageId=${pendingUserTurnReminder.messageId}`,
+                        );
+                    }
                 }
             } else {
                 const anchoredMessageId = appendReminderToLatestUserMessage(
@@ -467,10 +494,35 @@ export function runPostTransformPhase(args: RunPostTransformPhaseArgs): void {
             stickyNoteNudge.text,
         );
         if (!reinjected) {
-            sessionLog(
-                args.sessionId,
-                `preserving sticky note nudge anchor to avoid cache bust: messageId=${stickyNoteNudge.messageId}`,
-            );
+            if (isCacheBustingPass) {
+                // Anchor message gone (compacted/deleted) — re-anchor to latest visible user message.
+                const newAnchorId = appendReminderToLatestUserMessage(
+                    args.messages,
+                    stickyNoteNudge.text,
+                );
+                if (newAnchorId) {
+                    markNoteNudgeDelivered(
+                        args.db,
+                        args.sessionId,
+                        stickyNoteNudge.text,
+                        newAnchorId,
+                    );
+                    sessionLog(
+                        args.sessionId,
+                        `sticky note nudge re-anchored: ${stickyNoteNudge.messageId} → ${newAnchorId}`,
+                    );
+                } else {
+                    sessionLog(
+                        args.sessionId,
+                        `sticky note nudge anchor ${stickyNoteNudge.messageId} gone — no user message visible to re-anchor`,
+                    );
+                }
+            } else {
+                sessionLog(
+                    args.sessionId,
+                    `preserving sticky note nudge anchor to avoid cache bust: messageId=${stickyNoteNudge.messageId}`,
+                );
+            }
         }
     }
 

@@ -2,16 +2,16 @@ import type { Database } from "bun:sqlite";
 import { type ToolDefinition, tool } from "@opencode-ai/plugin";
 
 import {
-    addSessionNote,
-    addSmartNote,
-    clearSessionNotes,
-    dismissSmartNote,
+    addNote,
+    dismissNote,
+    getNotes,
     getReadySmartNotes,
     getSessionNotes,
-    type SessionNote,
+    type Note,
+    updateNote,
 } from "../../features/magic-context/storage";
 import { CTX_NOTE_DESCRIPTION } from "./constants";
-import type { CtxNoteArgs } from "./types";
+import type { CtxNoteArgs, CtxNoteReadFilter } from "./types";
 
 export interface CtxNoteToolDeps {
     db: Database;
@@ -19,12 +19,107 @@ export interface CtxNoteToolDeps {
     projectIdentity?: string;
 }
 
+function formatNoteLine(note: Note): string {
+    const statusSuffix = note.status === "active" ? "" : ` (${note.status})`;
+    const dismissHint =
+        note.status === "dismissed"
+            ? ""
+            : ` _(dismiss with \`ctx_note(action="dismiss", note_id=${note.id})\`)_`;
+
+    if (note.type === "session") {
+        return `- **#${note.id}**${statusSuffix}: ${note.content}${dismissHint}`;
+    }
+
+    const conditionText =
+        note.status === "ready"
+            ? (note.readyReason ?? note.surfaceCondition ?? "Condition satisfied")
+            : (note.surfaceCondition ?? "No condition recorded");
+    const conditionLabel = note.status === "ready" ? "Condition met" : "Condition";
+
+    return `- **#${note.id}**${statusSuffix}: ${note.content}\n  ${conditionLabel}: ${conditionText}${dismissHint}`;
+}
+
+function buildReadSections(args: {
+    db: Database;
+    sessionId: string;
+    projectIdentity?: string;
+    filter?: CtxNoteReadFilter;
+}): string[] {
+    if (args.filter === undefined) {
+        const sessionNotes = getSessionNotes(args.db, args.sessionId);
+        const readySmartNotes = args.projectIdentity
+            ? getReadySmartNotes(args.db, args.projectIdentity)
+            : [];
+        const sections: string[] = [];
+
+        if (sessionNotes.length > 0) {
+            sections.push(
+                `## Session Notes\n\n${sessionNotes.map((note) => formatNoteLine(note)).join("\n")}`,
+            );
+        }
+
+        if (readySmartNotes.length > 0) {
+            sections.push(
+                `## 🔔 Ready Smart Notes\n\n${readySmartNotes
+                    .map((note) => formatNoteLine(note))
+                    .join("\n\n")}`,
+            );
+        }
+
+        return sections;
+    }
+
+    const statusByFilter: Record<
+        CtxNoteReadFilter,
+        | "active"
+        | "pending"
+        | "ready"
+        | "dismissed"
+        | Array<"active" | "pending" | "ready" | "dismissed">
+    > = {
+        active: "active",
+        all: ["active", "pending", "ready", "dismissed"],
+        dismissed: "dismissed",
+        pending: "pending",
+        ready: "ready",
+    };
+
+    const sessionNotes = getNotes(args.db, {
+        sessionId: args.sessionId,
+        type: "session",
+        status: statusByFilter[args.filter],
+    });
+    const smartNotes = args.projectIdentity
+        ? getNotes(args.db, {
+              projectPath: args.projectIdentity,
+              type: "smart",
+              status: statusByFilter[args.filter],
+          })
+        : [];
+
+    const sections: string[] = [];
+
+    if (sessionNotes.length > 0) {
+        sections.push(
+            `## Session Notes\n\n${sessionNotes.map((note) => formatNoteLine(note)).join("\n")}`,
+        );
+    }
+
+    if (smartNotes.length > 0) {
+        sections.push(
+            `## Smart Notes\n\n${smartNotes.map((note) => formatNoteLine(note)).join("\n\n")}`,
+        );
+    }
+
+    return sections;
+}
+
 function createCtxNoteTool(deps: CtxNoteToolDeps): ToolDefinition {
     return tool({
         description: CTX_NOTE_DESCRIPTION,
         args: {
             action: tool.schema
-                .enum(["write", "read", "clear", "dismiss"])
+                .enum(["write", "read", "dismiss", "update"])
                 .optional()
                 .describe(
                     "Operation to perform. Defaults to 'write' when content is provided, otherwise 'read'.",
@@ -39,10 +134,16 @@ function createCtxNoteTool(deps: CtxNoteToolDeps): ToolDefinition {
                 .describe(
                     "Open-ended condition for smart notes. When provided, creates a project-scoped smart note that the dreamer evaluates nightly. The note surfaces when the condition is met.",
                 ),
+            filter: tool.schema
+                .enum(["all", "active", "pending", "ready", "dismissed"])
+                .optional()
+                .describe(
+                    "Optional read filter. Defaults to active session notes + ready smart notes. Use 'all' to inspect every status or 'pending' to inspect unsurfaced smart notes.",
+                ),
             note_id: tool.schema
                 .number()
                 .optional()
-                .describe("Smart note ID to dismiss (required for 'dismiss' action)."),
+                .describe("Note ID (required for 'dismiss' and 'update' actions)."),
         },
         async execute(args: CtxNoteArgs, toolContext) {
             const sessionId = toolContext.sessionID;
@@ -62,20 +163,18 @@ function createCtxNoteTool(deps: CtxNoteToolDeps): ToolDefinition {
                     if (!deps.projectIdentity) {
                         return "Error: Could not resolve project identity for smart note.";
                     }
-                    const note = addSmartNote(
-                        deps.db,
-                        deps.projectIdentity,
+                    const note = addNote(deps.db, "smart", {
                         content,
-                        args.surface_condition.trim(),
+                        projectPath: deps.projectIdentity,
                         sessionId,
-                    );
+                        surfaceCondition: args.surface_condition.trim(),
+                    });
                     return `Created smart note #${note.id}. Dreamer will evaluate the condition during nightly runs:\n- Content: ${content}\n- Condition: ${args.surface_condition.trim()}`;
                 }
 
                 // Simple session note
-                addSessionNote(deps.db, sessionId, content);
-                const total = getSessionNotes(deps.db, sessionId).length;
-                return `Saved session note ${total}. Historian will rewrite or deduplicate notes as needed.`;
+                const note = addNote(deps.db, "session", { sessionId, content });
+                return `Saved session note #${note.id}. Historian will rewrite or deduplicate notes as needed.`;
             }
 
             if (action === "dismiss") {
@@ -83,44 +182,41 @@ function createCtxNoteTool(deps: CtxNoteToolDeps): ToolDefinition {
                 if (typeof noteId !== "number") {
                     return "Error: 'note_id' is required when action is 'dismiss'.";
                 }
-                const dismissed = dismissSmartNote(deps.db, noteId);
+                const dismissed = dismissNote(deps.db, noteId);
                 return dismissed
-                    ? `Smart note #${noteId} dismissed.`
-                    : `Smart note #${noteId} not found or already dismissed.`;
+                    ? `Note #${noteId} dismissed.`
+                    : `Note #${noteId} not found or already dismissed.`;
             }
 
-            if (action === "clear") {
-                const existing = getSessionNotes(deps.db, sessionId);
-                clearSessionNotes(deps.db, sessionId);
-                return existing.length === 0
-                    ? "Session notes were already empty."
-                    : `Cleared ${existing.length} session note${existing.length === 1 ? "" : "s"}.`;
+            if (action === "update") {
+                const noteId = args.note_id;
+                if (typeof noteId !== "number") {
+                    return "Error: 'note_id' is required when action is 'update'.";
+                }
+                const updates: { content?: string; surfaceCondition?: string } = {};
+                if (args.content?.trim()) updates.content = args.content.trim();
+                if (args.surface_condition?.trim())
+                    updates.surfaceCondition = args.surface_condition.trim();
+
+                if (!updates.content && !updates.surfaceCondition) {
+                    return "Error: Provide 'content' and/or 'surface_condition' to update.";
+                }
+                const updated = updateNote(deps.db, noteId, updates);
+                if (!updated) {
+                    return `Note #${noteId} not found or has no compatible fields to update.`;
+                }
+                const parts: string[] = [];
+                if (updates.content) parts.push(`Content: ${updates.content}`);
+                if (updates.surfaceCondition) parts.push(`Condition: ${updates.surfaceCondition}`);
+                return `Updated note #${noteId}:\n${parts.join("\n")}`;
             }
 
-            // Read — show session notes + ready smart notes only.
-            // Pending smart notes are deliberately hidden — they clutter context
-            // and the agent can't act on them until dreamer surfaces them.
-            const notes = getSessionNotes(deps.db, sessionId);
-            const readySmartNotes = deps.projectIdentity
-                ? getReadySmartNotes(deps.db, deps.projectIdentity)
-                : [];
-
-            const sections: string[] = [];
-
-            if (notes.length > 0) {
-                const lines = notes.map(
-                    (note: SessionNote, index: number) => `${index + 1}. ${note.content}`,
-                );
-                sections.push(`## Session Notes\n\n${lines.join("\n")}`);
-            }
-
-            if (readySmartNotes.length > 0) {
-                const lines = readySmartNotes.map(
-                    (n) =>
-                        `- **#${n.id}**: ${n.content}\n  Condition met: ${n.readyReason ?? n.surfaceCondition}\n  _(dismiss with \`ctx_note(action="dismiss", note_id=${n.id})\`)_`,
-                );
-                sections.push(`## 🔔 Ready Smart Notes\n\n${lines.join("\n\n")}`);
-            }
+            const sections = buildReadSections({
+                db: deps.db,
+                filter: args.filter,
+                projectIdentity: deps.projectIdentity,
+                sessionId,
+            });
 
             if (sections.length === 0) {
                 return "## Notes\n\nNo session notes or smart notes.";

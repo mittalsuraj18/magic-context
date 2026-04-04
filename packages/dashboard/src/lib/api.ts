@@ -5,7 +5,7 @@ import type {
   SessionSummary,
   Compartment,
   SessionFact,
-  SessionNote,
+  Note,
   SessionMetaRow,
   ContextTokenBreakdown,
   DreamQueueEntry,
@@ -16,6 +16,8 @@ import type {
   DbCacheEvent,
   ConfigFile,
   DbHealth,
+  UserMemory,
+  UserMemoryCandidate,
 } from "./types";
 
 // ── Memory API ──────────────────────────────────────────────
@@ -84,8 +86,14 @@ export async function getSessionFacts(
 
 export async function getSessionNotes(
   sessionId: string
-): Promise<SessionNote[]> {
+): Promise<Note[]> {
   return invoke("get_session_notes", { sessionId });
+}
+
+export async function getSmartNotes(
+  projectPath: string
+): Promise<Note[]> {
+  return invoke("get_smart_notes", { projectPath });
 }
 
 export async function getSessionMeta(
@@ -196,6 +204,28 @@ export async function saveProjectConfig(
 export async function getAvailableModels(): Promise<string[]> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("get_available_models");
+}
+
+// ── User Memory API ─────────────────────────────────────────
+
+export async function getUserMemories(status?: string): Promise<UserMemory[]> {
+  return invoke("get_user_memories", { status: status ?? null });
+}
+
+export async function getUserMemoryCandidates(): Promise<UserMemoryCandidate[]> {
+  return invoke("get_user_memory_candidates");
+}
+
+export async function dismissUserMemory(id: number): Promise<void> {
+  return invoke("dismiss_user_memory", { id });
+}
+
+export async function deleteUserMemory(id: number): Promise<void> {
+  return invoke("delete_user_memory", { id });
+}
+
+export async function deleteUserMemoryCandidate(id: number): Promise<void> {
+  return invoke("delete_user_memory_candidate", { id });
 }
 
 // ── Utilities ───────────────────────────────────────────────

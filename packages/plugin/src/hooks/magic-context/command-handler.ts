@@ -6,12 +6,17 @@ import {
     processDreamQueue,
 } from "../../features/magic-context/dreamer";
 import { runSidekick } from "../../features/magic-context/sidekick/agent";
+import { getCompartments } from "../../features/magic-context/storage";
 import type { PluginContext } from "../../plugin/types";
 import { sessionLog } from "../../shared";
 import { executeFlush } from "./execute-flush";
 import { executeStatus } from "./execute-status";
 import type { NotificationParams } from "./send-session-notification";
 import { sendUserPrompt } from "./send-session-notification";
+
+/** Track per-session recomp confirmation for Desktop (no dialog available). */
+const recompConfirmationBySession = new Map<string, number>();
+const RECOMP_CONFIRMATION_WINDOW_MS = 60_000;
 
 export interface CommandExecuteInput {
     command: string;
@@ -135,6 +140,7 @@ async function executeDreaming(
             client: unknown;
             directory: string;
             executeDream?: (sessionId: string) => Promise<DreamRunResult | null>;
+            experimentalUserMemories?: { enabled: boolean; promotionThreshold: number };
         };
     },
     sessionId: string,
@@ -165,6 +171,7 @@ async function executeDreaming(
               tasks: deps.dreamer.config.tasks,
               taskTimeoutMinutes: deps.dreamer.config.task_timeout_minutes,
               maxRuntimeMinutes: deps.dreamer.config.max_runtime_minutes,
+              experimentalUserMemories: deps.dreamer.experimentalUserMemories,
           });
 
     await deps.sendNotification(
@@ -204,6 +211,7 @@ export function createMagicContextCommandHandler(deps: {
         client: unknown;
         directory: string;
         executeDream?: (sessionId: string) => Promise<DreamRunResult | null>;
+        experimentalUserMemories?: { enabled: boolean; promotionThreshold: number };
     };
 }) {
     const isStatusCommand = (command: string): boolean => command === "ctx-status";
@@ -262,14 +270,48 @@ export function createMagicContextCommandHandler(deps: {
             }
 
             if (isRecomp) {
-                await deps.sendNotification(
-                    sessionId,
-                    "## Magic Recomp\n\nHistorian recomp started. Rebuilding compartments and facts from raw session history now.",
-                    {},
-                );
-                result = deps.executeRecomp
-                    ? await deps.executeRecomp(sessionId)
-                    : "## Magic Recomp\n\n/ctx-recomp is unavailable because the recomp handler is not configured.";
+                if (!deps.executeRecomp) {
+                    result =
+                        "## Magic Recomp\n\n/ctx-recomp is unavailable because the recomp handler is not configured.";
+                } else {
+                    // Desktop double-tap confirmation.
+                    // TUI uses a native dialog → message bus → tui-action-consumer.ts
+                    const lastConfirmation = recompConfirmationBySession.get(sessionId);
+                    const now = Date.now();
+
+                    if (
+                        lastConfirmation &&
+                        now - lastConfirmation < RECOMP_CONFIRMATION_WINDOW_MS
+                    ) {
+                        // Confirmed — second /ctx-recomp within 60s
+                        recompConfirmationBySession.delete(sessionId);
+                        await deps.sendNotification(
+                            sessionId,
+                            "## Magic Recomp\n\nHistorian recomp started. Rebuilding compartments and facts from raw session history now.",
+                            {},
+                        );
+                        result = await deps.executeRecomp(sessionId);
+                    } else {
+                        // First attempt — show warning
+                        recompConfirmationBySession.set(sessionId, now);
+                        const compartments = getCompartments(deps.db, sessionId);
+                        const compartmentCount = compartments.length;
+                        const warningLines = [
+                            "## ⚠️ Recomp Confirmation Required",
+                            "",
+                            `You currently have **${compartmentCount}** compartments.`,
+                            "Running /ctx-recomp will **regenerate all compartments and facts** from raw session history.",
+                            "",
+                            "This operation:",
+                            "- May take a long time (minutes to hours for long sessions)",
+                            "- Will consume significant tokens on your historian model",
+                            "- Cannot be interrupted cleanly once started",
+                            "",
+                            "**To confirm, run `/ctx-recomp` again within 60 seconds.**",
+                        ];
+                        result = warningLines.join("\n");
+                    }
+                }
             }
 
             await deps.sendNotification(sessionId, result, {});

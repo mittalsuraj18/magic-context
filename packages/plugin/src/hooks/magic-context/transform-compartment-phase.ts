@@ -34,6 +34,10 @@ interface RunCompartmentPhaseArgs {
     getNotificationParams?: () => import("./send-session-notification").NotificationParams;
     /** True when this pass is already cache-busting (flush or scheduler execute). */
     cacheAlreadyBusting?: boolean;
+    /** When true, inject compaction markers into OpenCode's DB after historian publication */
+    experimentalCompactionMarkers?: boolean;
+    /** When true, extract user behavior observations from historian output */
+    experimentalUserMemories?: boolean;
 }
 
 export async function runCompartmentPhase(args: RunCompartmentPhaseArgs): Promise<{
@@ -111,6 +115,8 @@ export async function runCompartmentPhase(args: RunCompartmentPhaseArgs): Promis
                 historianTimeoutMs: args.historianTimeoutMs,
                 directory: args.compartmentDirectory,
                 getNotificationParams: args.getNotificationParams,
+                experimentalCompactionMarkers: args.experimentalCompactionMarkers,
+                experimentalUserMemories: args.experimentalUserMemories,
             });
             compartmentInProgress = true;
         }
@@ -146,6 +152,8 @@ export async function runCompartmentPhase(args: RunCompartmentPhaseArgs): Promis
                 historianTimeoutMs: args.historianTimeoutMs,
                 directory: args.compartmentDirectory,
                 getNotificationParams: args.getNotificationParams,
+                experimentalCompactionMarkers: args.experimentalCompactionMarkers,
+                experimentalUserMemories: args.experimentalUserMemories,
             });
             activeRun = getActiveCompartmentRun(args.sessionId);
         } else if (!activeRun && hasEligibleHistoryForCompartment()) {
@@ -184,7 +192,7 @@ export async function runCompartmentPhase(args: RunCompartmentPhaseArgs): Promis
         !awaitedCompartmentRun
     ) {
         try {
-            await runCompressionPassIfNeeded({
+            const compressed = await runCompressionPassIfNeeded({
                 client: args.client,
                 db: args.db,
                 sessionId: args.sessionId,
@@ -192,6 +200,19 @@ export async function runCompartmentPhase(args: RunCompartmentPhaseArgs): Promis
                 historyBudgetTokens: args.historyBudgetTokens,
                 historianTimeoutMs: args.historianTimeoutMs,
             });
+            // If compression rewrote compartments, refresh the injection so this
+            // pass renders the compressed history instead of the pre-compression block.
+            // clearInjectionCache was already called inside the compressor.
+            if (compressed && args.projectPath !== undefined) {
+                pendingCompartmentInjection = prepareCompartmentInjection(
+                    args.db,
+                    args.sessionId,
+                    args.messages,
+                    true, // force re-read — compressor just cleared the cache
+                    args.projectPath,
+                    args.injectionBudgetTokens,
+                );
+            }
         } catch (error: unknown) {
             sessionLog(
                 args.sessionId,

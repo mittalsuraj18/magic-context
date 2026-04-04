@@ -3,29 +3,35 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { runMigrations } from "./migrations";
 import {
-    addSessionNote,
+    addNote,
     buildCompartmentBlock,
     clearPendingOps,
     clearPersistedNudgePlacement,
     clearPersistedStickyTurnReminder,
     clearSession,
-    clearSessionNotes,
     closeDatabase,
+    dismissNote,
     getOrCreateSessionMeta,
     getPendingOps,
+    getPendingSmartNotes,
     getPersistedNudgePlacement,
     getPersistedStickyTurnReminder,
     getSessionNotes,
+    getSmartNotes,
     getTagById,
     getTagsBySession,
     getTopNBySize,
     insertTag,
+    markNoteReady,
     openDatabase,
     queuePendingOp,
     removePendingOp,
+    replaceAllSessionNotes,
     setPersistedNudgePlacement,
     setPersistedStickyTurnReminder,
+    updateNote,
     updateSessionMeta,
     updateTagStatus,
 } from "./storage";
@@ -63,6 +69,7 @@ function resolveDbPath(dataHome: string): string {
 function makeMemoryDatabase(): Database {
     const db = new Database(":memory:");
     initializeDatabase(db);
+    runMigrations(db);
     return db;
 }
 
@@ -87,7 +94,7 @@ describe("magic-context storage", () => {
                 "pending_ops",
                 "source_contents",
                 "session_meta",
-                "session_notes",
+                "notes",
             ]),
         );
         closeDatabase();
@@ -131,7 +138,7 @@ describe("magic-context storage", () => {
             lastNudgeBand: "near",
             isSubagent: true,
         });
-        addSessionNote(db, sessionId, "Persist me until clearSession runs.");
+        addNote(db, "session", { sessionId, content: "Persist me until clearSession runs." });
         const updatedMeta = getOrCreateSessionMeta(db, sessionId);
         //#then
         expect(initialMeta.counter).toBe(0);
@@ -147,14 +154,17 @@ describe("magic-context storage", () => {
         db.close(false);
     });
 
-    it("stores and clears session notes by session", () => {
+    it("stores and replaces session notes by session", () => {
         //#given
         const db = makeMemoryDatabase();
         const sessionId = "ses-notes";
 
         //#when
-        addSessionNote(db, sessionId, "Remember broad magic-context rename.");
-        addSessionNote(db, sessionId, "Keep historian notes terse.");
+        addNote(db, "session", {
+            sessionId,
+            content: "Remember broad magic-context rename.",
+        });
+        addNote(db, "session", { sessionId, content: "Keep historian notes terse." });
 
         //#then
         expect(getSessionNotes(db, sessionId).map((note) => note.content)).toEqual([
@@ -163,10 +173,54 @@ describe("magic-context storage", () => {
         ]);
 
         //#when
-        clearSessionNotes(db, sessionId);
+        replaceAllSessionNotes(db, sessionId, ["Keep historian notes very terse."]);
+
+        //#then
+        expect(getSessionNotes(db, sessionId).map((note) => note.content)).toEqual([
+            "Keep historian notes very terse.",
+        ]);
+
+        //#when
+        replaceAllSessionNotes(db, sessionId, []);
 
         //#then
         expect(getSessionNotes(db, sessionId)).toEqual([]);
+        db.close(false);
+    });
+
+    it("stores smart notes in the unified notes table and filters by status", () => {
+        //#given
+        const db = makeMemoryDatabase();
+        const smartNote = addNote(db, "smart", {
+            content: "Surface the release checklist when CI stabilizes.",
+            projectPath: "git:test-project",
+            sessionId: "ses-smart",
+            surfaceCondition: "When CI is green on main",
+        });
+
+        //#then
+        expect(getPendingSmartNotes(db, "git:test-project").map((note) => note.id)).toEqual([
+            smartNote.id,
+        ]);
+
+        //#when
+        const updated = updateNote(db, smartNote.id, {
+            content: "Surface the release checklist when release CI stabilizes.",
+            surfaceCondition: "When release CI is green on main",
+        });
+        markNoteReady(db, smartNote.id, "release CI is green on main");
+
+        //#then
+        expect(updated?.content).toBe("Surface the release checklist when release CI stabilizes.");
+        expect(getSmartNotes(db, "git:test-project", "ready")[0]?.readyReason).toBe(
+            "release CI is green on main",
+        );
+
+        //#when
+        dismissNote(db, smartNote.id);
+
+        //#then
+        expect(getSmartNotes(db, "git:test-project")).toEqual([]);
         db.close(false);
     });
 

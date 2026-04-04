@@ -2,7 +2,7 @@
 
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, it } from "bun:test";
-import { addSessionNote } from "../../features/magic-context/storage-notes";
+import { addNote } from "../../features/magic-context/storage-notes";
 import {
     clearNoteNudgeState,
     getNoteNudgeText,
@@ -46,11 +46,19 @@ function makeDb(): Database {
             cleared_reasoning_through_tag INTEGER DEFAULT 0
         );
 
-        CREATE TABLE session_notes (
+        CREATE TABLE notes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT NOT NULL,
+            type TEXT NOT NULL DEFAULT 'session',
+            status TEXT NOT NULL DEFAULT 'active',
             content TEXT NOT NULL,
-            created_at INTEGER NOT NULL
+            session_id TEXT,
+            project_path TEXT,
+            surface_condition TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            last_checked_at INTEGER,
+            ready_at INTEGER,
+            ready_reason TEXT
         );
     `);
     dbs.push(db);
@@ -73,7 +81,7 @@ function getPersistedRow(db: Database, sessionId: string) {
 describe("note-nudger", () => {
     it("persists trigger deferral and sticky delivery state in session_meta", () => {
         const db = makeDb();
-        addSessionNote(db, "ses-trigger", "Follow up later.");
+        addNote(db, "session", { sessionId: "ses-trigger", content: "Follow up later." });
 
         onNoteTrigger(db, "ses-trigger", "historian_complete");
 
@@ -93,10 +101,10 @@ describe("note-nudger", () => {
         expect(getPersistedRow(db, "ses-trigger")).toEqual({
             triggerPending: 0,
             triggerMessageId: "",
-            stickyText: text,
+            stickyText: text!,
             stickyMessageId: "u-2",
         });
-        expect(getStickyNoteNudge(db, "ses-trigger")).toEqual({ text, messageId: "u-2" });
+        expect(getStickyNoteNudge(db, "ses-trigger")).toEqual({ text: text!, messageId: "u-2" });
         expect(peekNoteNudgeText(db, "ses-trigger", "u-3")).toBeNull();
     });
 
@@ -110,7 +118,7 @@ describe("note-nudger", () => {
 
     it("clears persisted state so prior triggers and stickies no longer produce nudges", () => {
         const db = makeDb();
-        addSessionNote(db, "ses-clear", "Circle back.");
+        addNote(db, "session", { sessionId: "ses-clear", content: "Circle back." });
 
         onNoteTrigger(db, "ses-clear", "historian_complete");
         const text = peekNoteNudgeText(db, "ses-clear", "u-2");

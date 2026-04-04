@@ -1,6 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import { createEffect, createMemo, createSignal, on, onCleanup } from "solid-js"
 import type { TuiSlotPlugin, TuiPluginApi, TuiThemeCurrent } from "@opencode-ai/plugin/tui"
+import packageJson from "../../../package.json"
 import { loadSidebarSnapshot, type SidebarSnapshot } from "../data/context-db"
 
 const SINGLE_BORDER = { type: "single" } as any
@@ -303,10 +304,10 @@ const SidebarContent = (props: {
             <box flexDirection="row" justifyContent="space-between" alignItems="center">
                 <box paddingLeft={1} paddingRight={1} backgroundColor={props.theme.accent}>
                     <text fg={props.theme.background}>
-                        <b>Magic CTX</b>
+                        <b>Magic Context</b>
                     </text>
                 </box>
-                <text fg={props.theme.success}>active</text>
+                <text fg={props.theme.textMuted}>v{packageJson.version}</text>
             </box>
 
             {/* Token breakdown bar */}

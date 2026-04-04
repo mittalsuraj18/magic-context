@@ -106,10 +106,20 @@ pub fn get_session_facts(
 pub fn get_session_notes(
     state: State<'_, AppState>,
     session_id: String,
-) -> Result<Vec<db::SessionNote>, String> {
+) -> Result<Vec<db::Note>, String> {
     let path = state.get_db_path()?;
     let conn = db::open_readonly(&path).map_err(|e| e.to_string())?;
     db::get_session_notes(&conn, &session_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_smart_notes(
+    state: State<'_, AppState>,
+    project_path: String,
+) -> Result<Vec<db::Note>, String> {
+    let path = state.get_db_path()?;
+    let conn = db::open_readonly(&path).map_err(|e| e.to_string())?;
+    db::get_smart_notes(&conn, &project_path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -347,6 +357,57 @@ pub async fn test_embedding_endpoint(
         }
         Err(e) => Err(format!("Connection failed: {}", e)),
     }
+}
+
+// ── User Memory commands ────────────────────────────────────
+
+#[tauri::command]
+pub fn get_user_memories(
+    state: State<'_, AppState>,
+    status: Option<String>,
+) -> Result<Vec<db::UserMemory>, String> {
+    let path = state.get_db_path()?;
+    let conn = db::open_readonly(&path).map_err(|e| e.to_string())?;
+    db::get_user_memories(&conn, status.as_deref()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_user_memory_candidates(
+    state: State<'_, AppState>,
+) -> Result<Vec<db::UserMemoryCandidate>, String> {
+    let path = state.get_db_path()?;
+    let conn = db::open_readonly(&path).map_err(|e| e.to_string())?;
+    db::get_user_memory_candidates(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn dismiss_user_memory(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<(), String> {
+    let path = state.get_db_path()?;
+    let conn = db::open_readwrite(&path).map_err(|e| e.to_string())?;
+    db::dismiss_user_memory(&conn, id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_user_memory(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<(), String> {
+    let path = state.get_db_path()?;
+    let conn = db::open_readwrite(&path).map_err(|e| e.to_string())?;
+    db::delete_user_memory(&conn, id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_user_memory_candidate(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<(), String> {
+    let path = state.get_db_path()?;
+    let conn = db::open_readwrite(&path).map_err(|e| e.to_string())?;
+    db::delete_user_memory_candidate(&conn, id).map_err(|e| e.to_string())
 }
 
 // ── Health commands ─────────────────────────────────────────

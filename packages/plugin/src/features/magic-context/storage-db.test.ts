@@ -88,7 +88,9 @@ describe("storage-db", () => {
                     "idx_compartments_session",
                     "idx_compression_depth_session",
                     "idx_session_facts_session",
-                    "idx_session_notes_session",
+                    "idx_notes_session_status",
+                    "idx_notes_project_status",
+                    "idx_notes_type_status",
                 ]),
             );
         });

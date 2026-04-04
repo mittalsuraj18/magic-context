@@ -51,7 +51,7 @@
 **`src/features/`:**
 - Purpose: Group reusable subsystem logic by feature.
 - Contains: Magic-context services, dreamer runtime, sidekick support, storage, scheduler, tagger, and built-in commands.
-- Key files: `src/features/magic-context/storage-db.ts`, `src/features/magic-context/storage-meta-persisted.ts`, `src/features/magic-context/dreamer/runner.ts`, `src/features/magic-context/memory/storage-memory.ts`, `src/features/builtin-commands/commands.ts`
+- Key files: `src/features/magic-context/storage-db.ts`, `src/features/magic-context/storage-meta-persisted.ts`, `src/features/magic-context/dreamer/runner.ts`, `src/features/magic-context/memory/storage-memory.ts`, `src/features/magic-context/user-memory/storage-user-memory.ts`, `src/features/builtin-commands/commands.ts`
 
 **`src/tools/`:**
 - Purpose: Define the agent-facing tool surface.

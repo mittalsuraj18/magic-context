@@ -111,7 +111,29 @@ export async function runDoctor(): Promise<number> {
         }
     }
 
-    // 7. Check OMO config
+    // 7. Check user memories + dreamer compatibility
+    if (existsSync(paths.magicContextConfig)) {
+        try {
+            const mcRaw = readFileSync(paths.magicContextConfig, "utf-8");
+            const mcConfig = parse(mcRaw) as Record<string, unknown>;
+            const userMemObj = (mcConfig?.experimental as Record<string, unknown>)?.user_memories as
+                | Record<string, unknown>
+                | undefined;
+            const userMemEnabled = userMemObj?.enabled === true;
+            const dreamerObj = mcConfig?.dreamer as Record<string, unknown> | undefined;
+            const dreamerEnabled = dreamerObj?.enabled === true;
+            if (userMemEnabled && !dreamerEnabled) {
+                log.warn(
+                    "experimental_user_memories is enabled but dreamer is disabled — user memory candidates will be collected but never promoted to stable memories",
+                );
+                issues++;
+            }
+        } catch {
+            // Config parse failed — skip this check
+        }
+    }
+
+    // 8. Check OMO config
     if (paths.omoConfig) {
         log.info(`OMO config found: ${paths.omoConfig}`);
     }

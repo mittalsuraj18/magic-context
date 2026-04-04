@@ -76,6 +76,8 @@ export interface TransformDeps {
     ) => import("./send-session-notification").NotificationParams;
     getModelKey?: (sessionId: string) => string | undefined;
     projectPath?: string;
+    experimentalCompactionMarkers?: boolean;
+    experimentalUserMemories?: boolean;
 }
 
 export function createTransform(deps: TransformDeps) {
@@ -123,8 +125,12 @@ export function createTransform(deps: TransformDeps) {
             sessionId,
             deps.getModelKey?.(sessionId),
         );
-        const isCacheBusting =
-            deps.flushedSessions.has(sessionId) || schedulerDecisionEarly === "execute";
+        // isCacheBusting controls whether the injection cache is bypassed.
+        // Only true on explicit flushes — NOT on scheduler "execute" passes.
+        // Scheduler execute means "apply pending ops" not "rebuild injection from scratch".
+        // The injection cache is separately invalidated via clearInjectionCache() when
+        // historian publishes new compartments/facts or session is deleted/flushed.
+        const isCacheBusting = deps.flushedSessions.has(sessionId);
 
         let pendingCompartmentInjection: PreparedCompartmentInjection | null = null;
         if (fullFeatureMode) {
@@ -286,7 +292,12 @@ export function createTransform(deps: TransformDeps) {
             getNotificationParams: rawGetNotifParams
                 ? () => rawGetNotifParams(sessionId)
                 : undefined,
-            cacheAlreadyBusting: isCacheBusting,
+            // The compressor needs to know if this is a safe pass to run on.
+            // Scheduler "execute" passes are safe for compressor (they already bust cache
+            // via pending ops), but isCacheBusting is now narrower (flush-only) for injection cache.
+            cacheAlreadyBusting: isCacheBusting || schedulerDecisionEarly === "execute",
+            experimentalCompactionMarkers: deps.experimentalCompactionMarkers,
+            experimentalUserMemories: deps.experimentalUserMemories,
         });
         pendingCompartmentInjection = compartmentPhase.pendingCompartmentInjection;
         const awaitedCompartmentRun = compartmentPhase.awaitedCompartmentRun;

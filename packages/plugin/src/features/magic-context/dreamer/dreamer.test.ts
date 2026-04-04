@@ -5,6 +5,7 @@ import { afterAll, afterEach, describe, expect, it, mock, spyOn } from "bun:test
 import type { PluginContext } from "../../../plugin/types";
 
 const { initializeDatabase } = await import("../storage-db");
+const { runMigrations } = await import("../migrations");
 
 const { acquireLease, getLeaseHolder, isLeaseActive, releaseLease, renewLease } = await import(
     "./lease"
@@ -62,6 +63,7 @@ function createDreamClient(
 function createTestDb(): Database {
     const database = Database.open(":memory:");
     initializeDatabase(database);
+    runMigrations(database);
     return database;
 }
 

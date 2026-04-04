@@ -48,6 +48,7 @@ fn main() {
             commands::get_compartments,
             commands::get_session_facts,
             commands::get_session_notes,
+            commands::get_smart_notes,
             commands::get_session_meta,
             commands::get_context_token_breakdown,
             // Dreamer
@@ -69,6 +70,12 @@ fn main() {
             // Models
             commands::get_available_models,
             commands::test_embedding_endpoint,
+            // User Memories
+            commands::get_user_memories,
+            commands::get_user_memory_candidates,
+            commands::dismiss_user_memory,
+            commands::delete_user_memory,
+            commands::delete_user_memory_candidate,
             // Health
             commands::get_db_health,
         ])

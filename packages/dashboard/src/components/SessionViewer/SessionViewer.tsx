@@ -1,11 +1,12 @@
 import { createSignal, createResource, createMemo, For, Index, Show } from "solid-js";
-import type { SessionSummary, Compartment, SessionFact, SessionNote, SessionMetaRow, ContextTokenBreakdown } from "../../lib/types";
+import type { SessionSummary, Compartment, SessionFact, Note, SessionMetaRow, ContextTokenBreakdown } from "../../lib/types";
 import {
   getProjects,
   getSessions,
   getCompartments,
   getSessionFacts,
   getSessionNotes,
+  getSmartNotes,
   getSessionMeta,
   getContextTokenBreakdown,
   formatRelativeTime,
@@ -62,6 +63,14 @@ export default function SessionViewer() {
   const [notes] = createResource(selectedSession, async (sid) => {
     if (!sid) return [];
     return getSessionNotes(sid);
+  });
+
+  const [smartNotes] = createResource(selectedSession, async (sid) => {
+    if (!sid) return [];
+    // Get project identity from the selected session
+    const session = sessions()?.find(s => s.session_id === sid);
+    if (!session?.project_identity) return [];
+    return getSmartNotes(session.project_identity);
   });
 
   const [meta] = createResource(selectedSession, async (sid) => {
@@ -337,25 +346,67 @@ export default function SessionViewer() {
 
           {/* Notes tab */}
           <Show when={activeTab() === "notes"}>
-            <Show
-              when={(notes() ?? []).length > 0}
-              fallback={<div class="empty-state"><span class="empty-state-icon">📌</span>No notes</div>}
-            >
-              <div class="list-gap">
-                <For each={notes() ?? []}>
-                  {(note) => (
-                    <div class="card">
-                      <div style={{ "font-size": "12px", "white-space": "pre-wrap", "line-height": "1.6" }}>
-                        {note.content}
+            <div class="list-gap">
+              {/* Session Notes */}
+              <Show
+                when={(notes() ?? []).length > 0}
+                fallback={<div class="empty-state"><span class="empty-state-icon">📌</span>No session notes</div>}
+              >
+                <div class="list-gap">
+                  <For each={notes() ?? []}>
+                    {(note) => (
+                      <div class="card">
+                        <div style={{ "font-size": "12px", "white-space": "pre-wrap", "line-height": "1.6" }}>
+                          {note.content}
+                        </div>
+                        <div class="card-meta" style={{ "margin-top": "6px" }}>
+                          {formatRelativeTime(note.created_at)}
+                        </div>
                       </div>
-                      <div class="card-meta" style={{ "margin-top": "6px" }}>
-                        {formatRelativeTime(note.created_at)}
+                    )}
+                  </For>
+                </div>
+              </Show>
+
+              {/* Smart Notes */}
+              <Show when={(smartNotes() ?? []).length > 0}>
+                <div class="category-header" style={{ "margin-top": "16px" }}>
+                  Smart Notes <span class="category-count">({smartNotes()?.length})</span>
+                </div>
+                <div class="list-gap">
+                  <For each={smartNotes() ?? []}>
+                    {(smartNote) => (
+                      <div class="card" style={{ "border-left": "3px solid var(--accent)" }}>
+                        <div style={{ "font-size": "12px", "white-space": "pre-wrap", "line-height": "1.6" }}>
+                          {smartNote.content}
+                        </div>
+                        <div style={{ "margin-top": "8px", "font-size": "11px", color: "var(--text-secondary)" }}>
+                          <span style={{ "font-weight": 500 }}>Trigger:</span> {smartNote.surface_condition}
+                        </div>
+                        <div style={{ "margin-top": "6px", display: "flex", "align-items": "center", gap: "8px" }}>
+                          <span
+                            class="pill"
+                            style={{
+                              "font-size": "10px",
+                              "text-transform": "uppercase",
+                              "background": smartNote.status === "ready" ? "var(--success)" : "var(--text-muted)",
+                              "color": smartNote.status === "ready" ? "#fff" : "var(--text-primary)",
+                            }}
+                          >
+                            {smartNote.status}
+                          </span>
+                          <Show when={smartNote.status === "ready" && smartNote.ready_reason}>
+                            <span style={{ "font-size": "11px", color: "var(--text-secondary)", "font-style": "italic" }}>
+                              {smartNote.ready_reason}
+                            </span>
+                          </Show>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                </For>
-              </div>
-            </Show>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </div>
           </Show>
 
           {/* Meta tab */}

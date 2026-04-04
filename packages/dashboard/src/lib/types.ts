@@ -87,11 +87,19 @@ export interface SessionFact {
   updated_at: number;
 }
 
-export interface SessionNote {
+export interface Note {
   id: number;
-  session_id: string;
+  type: "session" | "smart";
+  status: "active" | "pending" | "ready" | "dismissed";
   content: string;
+  session_id: string | null;
+  project_path: string | null;
+  surface_condition: string | null;
   created_at: number;
+  updated_at: number;
+  last_checked_at: number | null;
+  ready_at: number | null;
+  ready_reason: string | null;
 }
 
 export interface SessionMetaRow {
@@ -246,10 +254,30 @@ export interface ProjectInfo {
   path: string | null;
 }
 
+export interface UserMemory {
+  id: number;
+  content: string;
+  status: "active" | "dismissed";
+  promoted_at: number | null;
+  source_candidate_ids: number[] | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface UserMemoryCandidate {
+  id: number;
+  content: string;
+  session_id: string;
+  source_compartment_start: number | null;
+  source_compartment_end: number | null;
+  created_at: number;
+}
+
 export type NavSection =
   | "memories"
   | "sessions"
   | "cache"
   | "dreamer"
+  | "user-memories"
   | "config"
   | "logs";

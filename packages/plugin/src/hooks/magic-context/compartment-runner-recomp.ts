@@ -11,6 +11,7 @@ import { getMemoriesByProject } from "../../features/magic-context/memory/storag
 import { updateSessionMeta } from "../../features/magic-context/storage-meta";
 import { normalizeSDKResponse } from "../../shared";
 import { getErrorMessage } from "../../shared/error-message";
+import { updateCompactionMarkerAfterPublication } from "./compaction-marker-manager";
 import { buildCompartmentAgentPrompt } from "./compartment-prompt";
 import { runCompressionPassIfNeeded } from "./compartment-runner-compressor";
 import { queueDropsForCompartmentalizedMessages } from "./compartment-runner-drop-queue";
@@ -22,7 +23,7 @@ import {
     validateChunkCoverage,
     validateStoredCompartments,
 } from "./compartment-runner-validation";
-import { renderMemoryBlock } from "./inject-compartments";
+import { clearInjectionCache, renderMemoryBlock } from "./inject-compartments";
 import {
     getProtectedTailStartOrdinal,
     getRawSessionMessageCount,
@@ -102,6 +103,9 @@ export async function executeContextRecompInternal(deps: CompartmentRunnerDeps):
             const promoted = promoteRecompStaging(db, sessionId);
             if (!promoted) return null;
 
+            // Invalidate injection cache after recomp promotion
+            clearInjectionCache(sessionId);
+
             if (deps.directory) {
                 promoteSessionFactsToMemory(
                     db,
@@ -115,6 +119,16 @@ export async function executeContextRecompInternal(deps: CompartmentRunnerDeps):
                 promoted.compartments[promoted.compartments.length - 1]?.endMessage ?? 0;
             if (lastCompartmentEnd > 0) {
                 queueDropsForCompartmentalizedMessages(db, sessionId, lastCompartmentEnd);
+            }
+
+            // Update compaction marker after recomp if experimental flag is enabled
+            if (deps.experimentalCompactionMarkers && lastCompartmentEnd > 0) {
+                updateCompactionMarkerAfterPublication(
+                    db,
+                    sessionId,
+                    lastCompartmentEnd,
+                    deps.directory,
+                );
             }
 
             return [
@@ -268,6 +282,8 @@ export async function executeContextRecompInternal(deps: CompartmentRunnerDeps):
             replaceAllCompartmentState(db, sessionId, candidateCompartments, candidateFacts);
             clearRecompStaging(db, sessionId);
         }
+        // Invalidate injection cache after final recomp promotion
+        clearInjectionCache(sessionId);
 
         const finalCompartments = promoted?.compartments ?? candidateCompartments;
         const finalFacts = promoted?.facts ?? candidateFacts;

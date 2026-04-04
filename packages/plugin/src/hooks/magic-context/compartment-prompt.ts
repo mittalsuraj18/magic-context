@@ -117,6 +117,23 @@ Output valid XML only in this shape:
 </compartments>
 </output>`;
 
+export const USER_OBSERVATIONS_APPENDIX = `
+
+User observation rules (EXPERIMENTAL):
+- After outputting compartments and facts, also output a <user_observations> section.
+- User observations capture UNIVERSAL behavioral patterns about the human user — not project-specific or technical.
+- Good observations: communication preferences, review focus areas, expertise level, decision-making patterns, frustration triggers, working style.
+- Bad observations (DO NOT emit): project-specific preferences, framework choices, coding language preferences, one-off moods, task-local frustration.
+- Each observation must be a single concise sentence in present tense.
+- Only emit observations you have strong evidence for from the conversation. Do not speculate.
+- Emit 0-5 observations per run. Zero is fine if nothing stands out.
+- The output shape inside <output> gains an additional section:
+<user_observations>
+* User prefers terse communication and dislikes verbose explanations.
+* User is technically deep — understands cache invalidation, SQLite internals, and prompt engineering.
+</user_observations>
+If no observations, omit the <user_observations> section entirely.`;
+
 export function buildCompressorPrompt(
     compartments: Array<{
         startMessage: number;
@@ -171,7 +188,11 @@ export function buildCompressorPrompt(
     return lines.join("\n");
 }
 
-export function buildCompartmentAgentPrompt(existingState: string, inputSource: string): string {
+export function buildCompartmentAgentPrompt(
+    existingState: string,
+    inputSource: string,
+    options?: { userMemoriesEnabled?: boolean },
+): string {
     return [
         "Existing state (read-only context for continuity and fact normalization — do NOT re-emit these compartments):",
         existingState,
@@ -187,5 +208,10 @@ export function buildCompartmentAgentPrompt(existingState: string, inputSource: 
         "- Drop any session fact already covered by a project memory in the existing state.",
         "- Do not preserve prior narrative wording verbatim; if a fact is already canonical and still correct, keep or lightly normalize it.",
         "- Drop obsolete or task-local facts.",
+        ...(options?.userMemoriesEnabled
+            ? [
+                  "- Also emit <user_observations> with universal behavioral observations about the user (see system prompt for rules).",
+              ]
+            : []),
     ].join("\n");
 }

@@ -8,8 +8,11 @@ import { promoteSessionFactsToMemory } from "../../features/magic-context/memory
 import { resolveProjectIdentity } from "../../features/magic-context/memory/project-identity";
 import { getMemoriesByProject } from "../../features/magic-context/memory/storage-memory";
 import { updateSessionMeta } from "../../features/magic-context/storage-meta";
+import { insertUserMemoryCandidates } from "../../features/magic-context/user-memory/storage-user-memory";
 import { normalizeSDKResponse } from "../../shared";
 import { getErrorMessage } from "../../shared/error-message";
+import { sessionLog } from "../../shared/logger";
+import { updateCompactionMarkerAfterPublication } from "./compaction-marker-manager";
 import { buildCompartmentAgentPrompt } from "./compartment-prompt";
 import { runCompressionPassIfNeeded } from "./compartment-runner-compressor";
 import { queueDropsForCompartmentalizedMessages } from "./compartment-runner-drop-queue";
@@ -17,7 +20,7 @@ import { runValidatedHistorianPass } from "./compartment-runner-historian";
 import { buildExistingStateXml } from "./compartment-runner-state-xml";
 import type { CompartmentRunnerDeps } from "./compartment-runner-types";
 import { validateChunkCoverage, validateStoredCompartments } from "./compartment-runner-validation";
-import { renderMemoryBlock } from "./inject-compartments";
+import { clearInjectionCache, renderMemoryBlock } from "./inject-compartments";
 import { onNoteTrigger } from "./note-nudger";
 import { getProtectedTailStartOrdinal, readSessionChunk } from "./read-session-chunk";
 import { sendIgnoredMessage } from "./send-session-notification";
@@ -143,6 +146,9 @@ export async function runCompartmentAgent(deps: CompartmentRunnerDeps): Promise<
             appendCompartments(db, sessionId, newCompartments);
             replaceSessionFacts(db, sessionId, validatedPass.facts ?? []);
         })();
+        // Invalidate in-memory injection cache so the next transform rebuilds <session-history>
+        // with the new compartments/facts. Without this, cached stale content persists.
+        clearInjectionCache(sessionId);
         if (deps.directory) {
             promoteSessionFactsToMemory(
                 db,
@@ -155,6 +161,16 @@ export async function runCompartmentAgent(deps: CompartmentRunnerDeps): Promise<
         const lastCompartmentEnd = lastNewEnd;
         queueDropsForCompartmentalizedMessages(db, sessionId, lastCompartmentEnd);
 
+        // Inject compaction marker into OpenCode's DB if experimental flag is enabled
+        if (deps.experimentalCompactionMarkers) {
+            updateCompactionMarkerAfterPublication(
+                db,
+                sessionId,
+                lastCompartmentEnd,
+                sessionDirectory,
+            );
+        }
+
         // Run compression pass if history block exceeds budget
         if (deps.historyBudgetTokens && deps.historyBudgetTokens > 0) {
             await runCompressionPassIfNeeded({
@@ -165,11 +181,35 @@ export async function runCompartmentAgent(deps: CompartmentRunnerDeps): Promise<
                 historyBudgetTokens: deps.historyBudgetTokens,
                 historianTimeoutMs,
             });
+            // No marker update needed after compression — marker uses static placeholder text.
+            // Compressor changes compartment content but not the boundary ordinal.
         }
 
         updateSessionMeta(db, sessionId, { compartmentInProgress: false });
         completedSuccessfully = true;
         onNoteTrigger(db, sessionId, "historian_complete");
+
+        // Store user behavior observations as candidates if user memories are enabled
+        if (validatedPass.userObservations && validatedPass.userObservations.length > 0) {
+            try {
+                const lastNew = newCompartments[newCompartments.length - 1];
+                insertUserMemoryCandidates(
+                    db,
+                    validatedPass.userObservations.map((obs) => ({
+                        content: obs,
+                        sessionId,
+                        sourceCompartmentStart: newCompartments[0]?.startMessage,
+                        sourceCompartmentEnd: lastNew?.endMessage,
+                    })),
+                );
+                sessionLog(
+                    sessionId,
+                    `stored ${validatedPass.userObservations.length} user memory candidate(s)`,
+                );
+            } catch (error) {
+                sessionLog(sessionId, "failed to store user memory candidates:", error);
+            }
+        }
     } catch (error: unknown) {
         // Historian runs are fail-closed because they update durable compartment state.
         const msg = getErrorMessage(error);

@@ -18,8 +18,29 @@ type EmbeddingPipeline = {
 type CreateEmbeddingPipeline = (
     task: "feature-extraction",
     model: string,
-    options: { quantized: boolean },
+    options: { quantized: boolean; dtype: string },
 ) => Promise<EmbeddingPipeline>;
+
+/**
+ * Temporarily redirects console.warn and console.error to the file logger
+ * so that @huggingface/transformers and ONNX runtime never leak to the TUI.
+ */
+async function withQuietConsole<T>(fn: () => Promise<T>): Promise<T> {
+    const origWarn = console.warn;
+    const origError = console.error;
+    const redirect = (...args: unknown[]) => {
+        const message = args.map((a) => (typeof a === "string" ? a : String(a))).join(" ");
+        log(`[transformers] ${message}`);
+    };
+    console.warn = redirect;
+    console.error = redirect;
+    try {
+        return await fn();
+    } finally {
+        console.warn = origWarn;
+        console.error = origError;
+    }
+}
 
 function isArrayLikeNumber(value: unknown): value is ArrayLike<number> {
     if (typeof value !== "object" || value === null || !("length" in value)) {
@@ -108,10 +129,18 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
                     string,
                     unknown
                 >;
+                const env = transformersModule.env as { logLevel?: unknown };
+                const LogLevel = transformersModule.LogLevel as Record<string, unknown> | undefined;
+                if (LogLevel && "ERROR" in LogLevel) {
+                    env.logLevel = LogLevel.ERROR;
+                }
                 const createPipeline = transformersModule.pipeline as CreateEmbeddingPipeline;
-                this.pipeline = await createPipeline("feature-extraction", this.model, {
-                    quantized: true,
-                });
+                this.pipeline = await withQuietConsole(() =>
+                    createPipeline("feature-extraction", this.model, {
+                        quantized: true,
+                        dtype: "fp32",
+                    }),
+                );
                 log(`[magic-context] embedding model loaded: ${this.model}`);
             } catch (error) {
                 log("[magic-context] embedding model failed to load:", error);
@@ -131,14 +160,17 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
         }
 
         try {
-            if (!this.pipeline) {
+            const pipeline = this.pipeline;
+            if (!pipeline) {
                 return null;
             }
 
-            const result = await this.pipeline(text, {
-                pooling: "mean",
-                normalize: true,
-            });
+            const result = await withQuietConsole(() =>
+                pipeline(text, {
+                    pooling: "mean",
+                    normalize: true,
+                }),
+            );
 
             return extractBatchEmbeddings(result, 1)[0] ?? null;
         } catch (error) {
@@ -157,14 +189,17 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
         }
 
         try {
-            if (!this.pipeline) {
+            const pipeline = this.pipeline;
+            if (!pipeline) {
                 return Array.from({ length: texts.length }, () => null);
             }
 
-            const result = await this.pipeline(texts, {
-                pooling: "mean",
-                normalize: true,
-            });
+            const result = await withQuietConsole(() =>
+                pipeline(texts, {
+                    pooling: "mean",
+                    normalize: true,
+                }),
+            );
 
             return extractBatchEmbeddings(result, texts.length);
         } catch (error) {

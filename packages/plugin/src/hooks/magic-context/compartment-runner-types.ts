@@ -11,6 +11,10 @@ export interface CompartmentRunnerDeps {
     directory: string;
     historyBudgetTokens?: number;
     getNotificationParams?: () => NotificationParams;
+    /** When true, inject compaction markers into OpenCode's DB after publication */
+    experimentalCompactionMarkers?: boolean;
+    /** When true, extract user behavior observations from historian output */
+    experimentalUserMemories?: boolean;
 }
 
 export interface CandidateCompartment {
@@ -35,6 +39,7 @@ export type ValidatedHistorianPassResult =
           ok: true;
           compartments: CandidateCompartment[];
           facts: Array<{ category: string; content: string }>;
+          userObservations?: string[];
       }
     | { ok: false; error: string };
 

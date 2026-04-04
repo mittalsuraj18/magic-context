@@ -21,8 +21,7 @@ import {
     setPersistedNoteNudgeTrigger,
     setPersistedNoteNudgeTriggerMessageId,
 } from "../../features/magic-context/storage-meta-persisted";
-import { getSessionNotes } from "../../features/magic-context/storage-notes";
-import { getReadySmartNotes } from "../../features/magic-context/storage-smart-notes";
+import { getReadySmartNotes, getSessionNotes } from "../../features/magic-context/storage-notes";
 import { sessionLog } from "../../shared/logger";
 
 export type NoteNudgeTrigger = "historian_complete" | "commit_detected" | "todos_complete";

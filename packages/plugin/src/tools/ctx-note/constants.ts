@@ -3,9 +3,9 @@ Use this for short goals, constraints, decisions, or reminders worth carrying fo
 
 Actions:
 - \`write\`: Append one note. Optionally provide \`surface_condition\` to create a smart note.
-- \`read\`: Show current notes (session notes + ready smart notes).
-- \`clear\`: Remove all session notes.
-- \`dismiss\`: Dismiss a ready smart note by \`note_id\`.
+- \`read\`: Show current notes. Defaults to active session notes + ready smart notes; use \`filter\` to inspect all, pending, ready, active, or dismissed notes.
+- \`dismiss\`: Dismiss a note by \`note_id\`.
+- \`update\`: Update a note by \`note_id\`.
 
 **Smart Notes**: When \`surface_condition\` is provided with \`write\`, the note becomes a project-scoped smart note.
 The dreamer evaluates smart note conditions during nightly runs and surfaces them when conditions are met.

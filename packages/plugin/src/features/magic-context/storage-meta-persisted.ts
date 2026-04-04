@@ -299,6 +299,58 @@ export function clearPersistedNoteNudge(db: Database, sessionId: string): void {
     ).run(sessionId);
 }
 
+// ── Compaction marker state ──
+
+export interface PersistedCompactionMarkerState {
+    boundaryMessageId: string;
+    summaryMessageId: string;
+    compactionPartId: string;
+    summaryPartId: string;
+    /** The raw ordinal at which the boundary was set */
+    boundaryOrdinal: number;
+}
+
+export function getPersistedCompactionMarkerState(
+    db: Database,
+    sessionId: string,
+): PersistedCompactionMarkerState | null {
+    const row = db
+        .prepare("SELECT compaction_marker_state FROM session_meta WHERE session_id = ?")
+        .get(sessionId) as { compaction_marker_state?: string } | null;
+    const raw = row?.compaction_marker_state;
+    if (!raw || raw.length === 0) return null;
+    try {
+        const parsed = JSON.parse(raw);
+        if (
+            parsed &&
+            typeof parsed === "object" &&
+            typeof parsed.boundaryMessageId === "string" &&
+            typeof parsed.summaryMessageId === "string" &&
+            typeof parsed.compactionPartId === "string" &&
+            typeof parsed.summaryPartId === "string" &&
+            typeof parsed.boundaryOrdinal === "number"
+        ) {
+            return parsed as PersistedCompactionMarkerState;
+        }
+    } catch {
+        // Intentional: corrupt JSON → treat as empty
+    }
+    return null;
+}
+
+export function setPersistedCompactionMarkerState(
+    db: Database,
+    sessionId: string,
+    state: PersistedCompactionMarkerState | null,
+): void {
+    ensureSessionMetaRow(db, sessionId);
+    const json = state ? JSON.stringify(state) : "";
+    db.prepare("UPDATE session_meta SET compaction_marker_state = ? WHERE session_id = ?").run(
+        json,
+        sessionId,
+    );
+}
+
 // ── Stripped placeholder message IDs ──
 
 export function getStrippedPlaceholderIds(db: Database, sessionId: string): Set<string> {

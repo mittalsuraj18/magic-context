@@ -76,6 +76,10 @@ export interface MagicContextDeps {
         sidekick?: SidekickConfig;
         dreamer?: DreamerConfig;
         commit_cluster_trigger?: { enabled: boolean; min_clusters: number };
+        experimental?: {
+            compaction_markers?: boolean;
+            user_memories?: { enabled: boolean; promotion_threshold: number };
+        };
     };
 }
 
@@ -194,6 +198,8 @@ export function createMagicContextHook(deps: MagicContextDeps) {
             return resolveModelKey(model?.providerID, model?.modelID);
         },
         projectPath,
+        experimentalCompactionMarkers: deps.config.experimental?.compaction_markers,
+        experimentalUserMemories: deps.config.experimental?.user_memories?.enabled,
     });
     const eventHandler = createEventHandler({
         contextUsageMap,
@@ -233,6 +239,13 @@ export function createMagicContextHook(deps: MagicContextDeps) {
             tasks: dreaming.tasks,
             taskTimeoutMinutes: dreaming.task_timeout_minutes,
             maxRuntimeMinutes: dreaming.max_runtime_minutes,
+            experimentalUserMemories: deps.config.experimental?.user_memories?.enabled
+                ? {
+                      enabled: true,
+                      promotionThreshold:
+                          deps.config.experimental.user_memories?.promotion_threshold,
+                  }
+                : undefined,
         }).catch((error: unknown) => {
             log("[dreamer] scheduled queue processing failed:", error);
         });
@@ -283,6 +296,13 @@ export function createMagicContextHook(deps: MagicContextDeps) {
                   projectPath,
                   client: deps.client,
                   directory: deps.directory,
+                  experimentalUserMemories: deps.config.experimental?.user_memories?.enabled
+                      ? {
+                            enabled: true,
+                            promotionThreshold:
+                                deps.config.experimental.user_memories?.promotion_threshold,
+                        }
+                      : undefined,
               }
             : undefined,
     });
@@ -298,6 +318,7 @@ export function createMagicContextHook(deps: MagicContextDeps) {
         directory: deps.directory,
         flushedSessions,
         lastHeuristicsTurnId,
+        experimentalUserMemories: deps.config.experimental?.user_memories?.enabled,
     });
 
     const eventHook = createEventHook({

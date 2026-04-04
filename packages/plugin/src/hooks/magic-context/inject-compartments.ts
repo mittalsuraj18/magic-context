@@ -23,9 +23,10 @@ export interface PreparedCompartmentInjection {
 
 /**
  * In-memory cache of the last compartment injection result per session.
- * On defer (cache-safe) passes, the cached result is replayed so that historian
+ * On non-flush passes, the cached result is replayed so that historian
  * publications between passes do not bust the Anthropic prompt-cache prefix.
- * The cache is refreshed only on cache-busting passes (execute / explicit flush).
+ * The cache is invalidated explicitly via clearInjectionCache() after
+ * historian/compressor/recomp write new compartments or facts.
  */
 const injectionCache = new Map<string, PreparedCompartmentInjection>();
 
@@ -87,7 +88,10 @@ function trimMemoriesToBudget(
         if (a.status === "permanent" && b.status !== "permanent") return -1;
         if (b.status === "permanent" && a.status !== "permanent") return 1;
         // Then by seen count descending (more frequently seen = higher priority)
-        return b.seenCount - a.seenCount;
+        const seenDiff = b.seenCount - a.seenCount;
+        if (seenDiff !== 0) return seenDiff;
+        // Deterministic tiebreaker by id to ensure stable ordering for cache safety
+        return a.id - b.id;
     });
 
     const result: Memory[] = [];
@@ -160,7 +164,7 @@ export function prepareCompartmentInjection(
     let memoryCount = 0;
     if (projectPath) {
         // Use cached memory block to avoid cache busting on background changes (ctx_memory write, promotion).
-        // Cache is cleared by replaceAllCompartmentState after historian runs (which already bust cache).
+        // Cache is cleared by replaceSessionFacts/replaceAllCompartmentState after historian/compressor/recomp.
         // Audit note: `as` cast is safe here — session_meta schema is owned by this plugin and the two
         // columns are guaranteed present after initializeDatabase(). A type guard would add overhead on a
         // hot path (every transform) for a table we fully control.

@@ -88,6 +88,7 @@ export function validateHistorianOutput(
         ok: true,
         compartments: mapped.compartments,
         facts: parsed.facts,
+        userObservations: parsed.userObservations.length > 0 ? parsed.userObservations : undefined,
     };
 }
 

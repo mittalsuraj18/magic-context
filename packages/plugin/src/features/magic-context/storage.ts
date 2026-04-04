@@ -44,11 +44,21 @@ export {
     updateSessionMeta,
 } from "./storage-meta";
 export {
-    addSessionNote,
-    clearSessionNotes,
+    addNote,
+    deleteNote,
+    dismissNote,
+    getNotes,
+    getPendingSmartNotes,
+    getReadySmartNotes,
     getSessionNotes,
+    getSmartNotes,
+    markNoteChecked,
+    markNoteReady,
+    type Note,
+    type NoteStatus,
+    type NoteType,
     replaceAllSessionNotes,
-    type SessionNote,
+    updateNote,
 } from "./storage-notes";
 export {
     clearPendingOps,
@@ -56,18 +66,6 @@ export {
     queuePendingOp,
     removePendingOp,
 } from "./storage-ops";
-export {
-    addSmartNote,
-    deleteSmartNote,
-    dismissSmartNote,
-    getPendingSmartNotes,
-    getReadySmartNotes,
-    getSmartNotes,
-    markSmartNoteChecked,
-    markSmartNoteReady,
-    type SmartNote,
-    type SmartNoteStatus,
-} from "./storage-smart-notes";
 export {
     getSourceContents,
     replaceSourceContent,

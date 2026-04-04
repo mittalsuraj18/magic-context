@@ -9,11 +9,8 @@ import { extractLatestAssistantText } from "../../../shared/assistant-message-ex
 import { getErrorMessage } from "../../../shared/error-message";
 import { log } from "../../../shared/logger";
 import { getMemoryCountsByStatus } from "../memory/storage-memory";
-import {
-    getPendingSmartNotes,
-    markSmartNoteChecked,
-    markSmartNoteReady,
-} from "../storage-smart-notes";
+import { getPendingSmartNotes, markNoteChecked, markNoteReady } from "../storage-notes";
+import { reviewUserMemories } from "../user-memory/review-user-memories";
 import { acquireLease, getLeaseHolder, releaseLease, renewLease } from "./lease";
 import {
     clearStaleEntries,
@@ -74,6 +71,7 @@ export async function runDream(args: {
     maxRuntimeMinutes: number;
     parentSessionId?: string;
     sessionDirectory?: string;
+    experimentalUserMemories?: { enabled: boolean; promotionThreshold: number };
 }): Promise<DreamRunResult> {
     const holderId = crypto.randomUUID();
     const startedAt = Date.now();
@@ -262,6 +260,32 @@ export async function runDream(args: {
                 }
             }
         }
+        // ── User memory review phase ──
+        // Runs after regular dream tasks, reviews user memory candidates for promotion.
+        if (args.experimentalUserMemories?.enabled && Date.now() <= deadline) {
+            try {
+                const reviewResult = await reviewUserMemories({
+                    db: args.db,
+                    client: args.client,
+                    parentSessionId,
+                    sessionDirectory: args.sessionDirectory,
+                    holderId,
+                    deadline,
+                    promotionThreshold: args.experimentalUserMemories.promotionThreshold,
+                });
+                if (
+                    reviewResult.promoted > 0 ||
+                    reviewResult.merged > 0 ||
+                    reviewResult.dismissed > 0
+                ) {
+                    log(
+                        `[dreamer] user-memories: promoted=${reviewResult.promoted} merged=${reviewResult.merged} dismissed=${reviewResult.dismissed} consumed=${reviewResult.candidatesConsumed}`,
+                    );
+                }
+            } catch (error) {
+                log(`[dreamer] user-memory review failed: ${getErrorMessage(error)}`);
+            }
+        }
         // ── Smart note evaluation phase ──
         // Runs after regular dream tasks, evaluates pending smart note conditions.
         // Not a user-configurable task — always runs when dreamer has pending smart notes.
@@ -445,7 +469,7 @@ Only include notes whose conditions you could definitively evaluate. Skip notes 
         const jsonMatch = output.match(/\[[\s\S]*\]/);
         if (!jsonMatch) {
             log("[dreamer] smart notes: no JSON array found in output, skipping");
-            for (const note of pendingNotes) markSmartNoteChecked(args.db, note.id);
+            for (const note of pendingNotes) markNoteChecked(args.db, note.id);
             throw new Error("Smart note evaluation returned no JSON array.");
         }
 
@@ -454,7 +478,7 @@ Only include notes whose conditions you could definitively evaluate. Skip notes 
             evaluations = JSON.parse(jsonMatch[0]);
         } catch {
             log(`[dreamer] smart notes: failed to parse JSON from LLM output, marking all checked`);
-            for (const note of pendingNotes) markSmartNoteChecked(args.db, note.id);
+            for (const note of pendingNotes) markNoteChecked(args.db, note.id);
             throw new Error("Smart note evaluation returned invalid JSON.");
         }
         let surfaced = 0;
@@ -464,20 +488,20 @@ Only include notes whose conditions you could definitively evaluate. Skip notes 
             if (!note) continue;
 
             if (evaluation.met) {
-                markSmartNoteReady(args.db, note.id, evaluation.reason);
+                markNoteReady(args.db, note.id, evaluation.reason);
                 surfaced++;
                 log(
                     `[dreamer] smart notes: #${note.id} condition MET — "${evaluation.reason ?? "condition satisfied"}"`,
                 );
             } else {
-                markSmartNoteChecked(args.db, note.id);
+                markNoteChecked(args.db, note.id);
             }
         }
 
         // Mark any notes not in the evaluation as checked (LLM skipped them)
         for (const note of pendingNotes) {
             if (!evaluations.some((e) => e.id === note.id)) {
-                markSmartNoteChecked(args.db, note.id);
+                markNoteChecked(args.db, note.id);
             }
         }
 
@@ -526,6 +550,7 @@ export async function processDreamQueue(args: {
     tasks: DreamingTask[];
     taskTimeoutMinutes: number;
     maxRuntimeMinutes: number;
+    experimentalUserMemories?: { enabled: boolean; promotionThreshold: number };
 }): Promise<DreamRunResult | null> {
     // Use configured max runtime + 30min buffer for stale threshold instead of hardcoded 2h
     const maxRuntimeMs = args.maxRuntimeMinutes * 60 * 1000;
@@ -552,6 +577,7 @@ export async function processDreamQueue(args: {
             taskTimeoutMinutes: args.taskTimeoutMinutes,
             maxRuntimeMinutes: args.maxRuntimeMinutes,
             sessionDirectory: projectDirectory,
+            experimentalUserMemories: args.experimentalUserMemories,
         });
     } catch (error) {
         log(`[dreamer] runDream threw for ${entry.projectIdentity}: ${getErrorMessage(error)}`);

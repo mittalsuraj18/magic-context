@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { getOpenCodeStorageDir } from "../../shared/data-path";
 import { getErrorMessage } from "../../shared/error-message";
 import { log } from "../../shared/logger";
+import { runMigrations } from "./migrations";
 
 const databases = new Map<string, Database>();
 const FALLBACK_DATABASE_KEY = "__fallback__:memory:";
@@ -287,8 +288,12 @@ CREATE INDEX IF NOT EXISTS idx_dream_queue_pending ON dream_queue(started_at, en
     ensureColumn(db, "dream_queue", "retry_count", "INTEGER DEFAULT 0");
     ensureColumn(db, "tags", "reasoning_byte_size", "INTEGER DEFAULT 0");
     ensureColumn(db, "session_meta", "system_prompt_tokens", "INTEGER DEFAULT 0");
+    ensureColumn(db, "session_meta", "compaction_marker_state", "TEXT DEFAULT ''");
 }
 
+// Intentional: the definition regex allows single quotes and parens because SQLite column
+// defaults use them (e.g. TEXT DEFAULT '', INTEGER DEFAULT 0). All callsites pass hardcoded
+// string literals — no user input reaches this function, so the regex is sufficient.
 function ensureColumn(db: Database, table: string, column: string, definition: string): void {
     if (
         !/^[a-z_]+$/.test(table) ||
@@ -308,6 +313,7 @@ function createFallbackDatabase(): Database {
     try {
         const fallback = new Database(":memory:");
         initializeDatabase(fallback);
+        runMigrations(fallback);
         return fallback;
     } catch (error) {
         throw new Error(
@@ -331,6 +337,7 @@ export function openDatabase(): Database {
 
         const db = new Database(dbPath);
         initializeDatabase(db);
+        runMigrations(db);
         databases.set(dbPath, db);
         persistenceByDatabase.set(db, true);
         persistenceErrorByDatabase.delete(db);

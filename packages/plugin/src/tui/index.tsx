@@ -5,7 +5,8 @@ import { dirname, join } from "node:path"
 import { createMemo } from "solid-js"
 import type { TuiPlugin, TuiPluginApi, TuiThemeCurrent } from "@opencode-ai/plugin/tui"
 import { createSidebarContentSlot } from "./slots/sidebar-content"
-import { closeDb, loadStatusDetail, type StatusDetail } from "./data/context-db"
+import packageJson from "../../package.json"
+import { closeDb, consumeTuiMessages, getCompartmentCount, loadStatusDetail, sendMessageToServer, type StatusDetail } from "./data/context-db"
 import { detectConflicts } from "../shared/conflict-detector"
 import { fixConflicts } from "../shared/conflict-fixer"
 import { readJsoncFile } from "../shared/jsonc-parser"
@@ -278,7 +279,7 @@ const StatusDialog = (props: { api: TuiPluginApi; s: StatusDetail }) => {
             {/* Title */}
             <box justifyContent="center" width="100%" marginBottom={1}>
                 <text fg={t().accent}>
-                    <b>⚡ Magic Context Status</b>
+                    <b>⚡ Magic Context Status</b>  <text fg={t().textMuted}>v{packageJson.version}</text>
                 </text>
             </box>
 
@@ -406,6 +407,36 @@ function getModelKeyFromMessages(api: TuiPluginApi, sessionId: string): string |
     return undefined
 }
 
+function showRecompDialog(api: TuiPluginApi) {
+    const sessionId = getSessionId(api)
+    if (!sessionId) {
+        api.ui.toast({ message: "No active session", variant: "warning" })
+        return
+    }
+
+    const count = getCompartmentCount(sessionId)
+    api.ui.dialog.replace(() => (
+        <api.ui.DialogConfirm
+            title="⚠️ Recomp Confirmation"
+            message={[
+                `You have ${count} compartments.`,
+                "",
+                "Recomp will regenerate all compartments and facts from raw history.",
+                "This may take a long time and consume significant tokens.",
+                "",
+                "Proceed?",
+            ].join("\n")}
+            onConfirm={() => {
+                sendMessageToServer("action", { command: "recomp" }, sessionId)
+                api.ui.toast({ message: "Recomp requested — historian will start shortly", variant: "info", duration: 5000 })
+            }}
+            onCancel={() => {
+                api.ui.toast({ message: "Recomp cancelled", variant: "info", duration: 3000 })
+            }}
+        />
+    ))
+}
+
 function showStatusDialog(api: TuiPluginApi) {
     const sessionId = getSessionId(api)
     if (!sessionId) {
@@ -435,10 +466,54 @@ const tui: TuiPlugin = async (api, _options, meta) => {
                 showStatusDialog(api)
             },
         },
+        {
+            title: "Magic Context: Recomp",
+            value: "magic-context.recomp",
+            category: "Magic Context",
+            slash: { name: "ctx-recomp" },
+            onSelect() {
+                showRecompDialog(api)
+            },
+        },
     ])
+
+    // Poll for server→TUI messages (toasts, dialogs) every 2 seconds
+    const messagePoller = setInterval(() => {
+        try {
+            const messages = consumeTuiMessages()
+            for (const msg of messages) {
+                if (msg.type === "toast") {
+                    const p = msg.payload
+                    api.ui.toast({
+                        message: String(p.message ?? ""),
+                        variant: (p.variant as "info" | "warning" | "error" | "success") ?? "info",
+                        duration: typeof p.duration === "number" ? p.duration : 5000,
+                    })
+                } else if (msg.type === "dialog_confirm") {
+                    const p = msg.payload
+                    const dialogId = String(p.id ?? "")
+                    api.ui.dialog.replace(() => (
+                        <api.ui.DialogConfirm
+                            title={String(p.title ?? "Confirm")}
+                            message={String(p.message ?? "")}
+                            onConfirm={() => {
+                                sendMessageToServer("dialog_result", { id: dialogId, confirmed: true }, msg.sessionId ?? undefined)
+                            }}
+                            onCancel={() => {
+                                sendMessageToServer("dialog_result", { id: dialogId, confirmed: false }, msg.sessionId ?? undefined)
+                            }}
+                        />
+                    ))
+                }
+            }
+        } catch {
+            // Intentional: message polling should never crash the TUI
+        }
+    }, 2000)
 
     // Clean up on dispose
     api.lifecycle.onDispose(() => {
+        clearInterval(messagePoller)
         closeDb()
     })
 

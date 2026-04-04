@@ -5,11 +5,19 @@ import { createCtxNoteTools } from "./tools";
 function createTestDb(): Database {
     const db = new Database(":memory:");
     db.run(`
-    CREATE TABLE session_notes (
+    CREATE TABLE notes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'session',
+      status TEXT NOT NULL DEFAULT 'active',
       content TEXT NOT NULL,
-      created_at INTEGER NOT NULL
+      session_id TEXT,
+      project_path TEXT,
+      surface_condition TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      last_checked_at INTEGER,
+      ready_at INTEGER,
+      ready_reason TEXT
     );
   `);
     return db;
@@ -33,8 +41,9 @@ describe("createCtxNoteTools", () => {
         );
         const readResult = await tools.ctx_note.execute({ action: "read" }, toolContext());
 
-        expect(writeResult).toContain("Saved session note 1");
+        expect(writeResult).toContain("Saved session note #1");
         expect(readResult).toContain("## Session Notes");
+        expect(readResult).toContain("#1");
         expect(readResult).toContain("Remember the user prefers build on integrate.");
     });
 
@@ -45,12 +54,56 @@ describe("createCtxNoteTools", () => {
         expect(result).toContain("'content' is required");
     });
 
-    it("clears notes", async () => {
+    it("dismisses session notes and can still inspect them with filter='all'", async () => {
         await tools.ctx_note.execute({ action: "write", content: "First note" }, toolContext());
-        const clearResult = await tools.ctx_note.execute({ action: "clear" }, toolContext());
+        const dismissResult = await tools.ctx_note.execute(
+            { action: "dismiss", note_id: 1 },
+            toolContext(),
+        );
         const readResult = await tools.ctx_note.execute({ action: "read" }, toolContext());
+        const readAllResult = await tools.ctx_note.execute(
+            { action: "read", filter: "all" },
+            toolContext(),
+        );
 
-        expect(clearResult).toContain("Cleared 1 session note");
+        expect(dismissResult).toContain("Note #1 dismissed");
         expect(readResult).toContain("No session notes or smart notes");
+        expect(readAllResult).toContain("dismissed");
+        expect(readAllResult).toContain("First note");
+    });
+
+    it("updates smart notes", async () => {
+        tools = createCtxNoteTools({
+            db,
+            dreamerEnabled: true,
+            projectIdentity: "git:test-project",
+        });
+
+        await tools.ctx_note.execute(
+            {
+                action: "write",
+                content: "Implement the cleanup after the API settles.",
+                surface_condition: "When PR #42 is merged",
+            },
+            toolContext(),
+        );
+
+        const updateResult = await tools.ctx_note.execute(
+            {
+                action: "update",
+                note_id: 1,
+                content: "Implement the cleanup after the schema settles.",
+                surface_condition: "When PR #108 is merged",
+            },
+            toolContext(),
+        );
+        const readAllResult = await tools.ctx_note.execute(
+            { action: "read", filter: "all" },
+            toolContext(),
+        );
+
+        expect(updateResult).toContain("Updated note #1");
+        expect(readAllResult).toContain("Implement the cleanup after the schema settles.");
+        expect(readAllResult).toContain("When PR #108 is merged");
     });
 });

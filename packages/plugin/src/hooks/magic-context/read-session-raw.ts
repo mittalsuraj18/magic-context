@@ -71,7 +71,15 @@ export function readRawSessionMessagesFromDb(db: Database, sessionId: string): R
         partsByMessageId.set(part.message_id, list);
     }
 
-    return messageRows.flatMap((row, index) => {
+    // Filter out compaction summary messages injected by magic-context.
+    // These exist only for OpenCode's filterCompacted boundary and must not
+    // be visible to historian, trigger evaluation, FTS indexing, or ctx_expand.
+    const filtered = messageRows.filter((row) => {
+        const info = parseJsonRecord(row.data);
+        return !(info?.summary === true && info?.finish === "stop");
+    });
+
+    return filtered.flatMap((row, index) => {
         const info = parseJsonRecord(row.data);
         if (!info) return [];
         const role = typeof info.role === "string" ? info.role : "unknown";

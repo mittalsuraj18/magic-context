@@ -124,6 +124,21 @@
 - Location: `src/features/magic-context/dreamer/queue.ts`, `src/features/magic-context/dreamer/lease.ts`, `src/features/magic-context/dreamer/storage-dream-state.ts`
 - Pattern: SQLite-backed queue plus cooperative lease lock.
 
+**User memory pipeline:**
+- Purpose: Extract user behavioral observations from historian output, collect candidates, and promote recurring patterns to stable user memories.
+- Location: `src/features/magic-context/user-memory/storage-user-memory.ts`, `src/features/magic-context/user-memory/review-user-memories.ts`
+- Pattern: Historian extracts candidates, dreamer reviews and promotes, system prompt injects stable memories.
+
+**Plugin message bus:**
+- Purpose: Enable asynchronous communication between the TUI plugin and server plugin via SQLite.
+- Location: `src/features/magic-context/plugin-messages.ts`
+- Pattern: SQLite-backed message queue with direction, type, and payload columns; consumed atomically.
+
+**Compaction markers:**
+- Purpose: Inject OpenCode-compatible compaction boundaries into the message table so `filterCompacted` stops at historian's last compartment boundary.
+- Location: `src/hooks/magic-context/compaction-marker.ts`, `src/hooks/magic-context/compaction-marker-manager.ts`
+- Pattern: Write summary/compaction rows into OpenCode's DB after historian publishes; filter them out from raw reads.
+
 **Agent prompt pack:**
 - Purpose: Keep hidden-agent identities and prompt text isolated from runtime wiring.
 - Location: `src/agents/dreamer.ts`, `src/agents/historian.ts`, `src/agents/sidekick.ts`, `src/agents/magic-context-prompt.ts`

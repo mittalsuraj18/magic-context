@@ -6,13 +6,17 @@ import { loadPluginConfig } from "./config";
 import { getMagicContextBuiltinCommands } from "./features/builtin-commands/commands";
 import { DREAMER_SYSTEM_PROMPT } from "./features/magic-context/dreamer/task-prompts";
 import { SIDEKICK_SYSTEM_PROMPT } from "./features/magic-context/sidekick/agent";
-import { COMPARTMENT_AGENT_SYSTEM_PROMPT } from "./hooks/magic-context/compartment-prompt";
+import {
+    COMPARTMENT_AGENT_SYSTEM_PROMPT,
+    USER_OBSERVATIONS_APPENDIX,
+} from "./hooks/magic-context/compartment-prompt";
 import { cleanupConflictWarnings, sendConflictWarning } from "./plugin/conflict-warning-hook";
 import { startDreamScheduleTimer } from "./plugin/dream-timer";
 import { createEventHandler } from "./plugin/event";
 import { createSessionHooks } from "./plugin/hooks/create-session-hooks";
 import { createMessagesTransformHandler } from "./plugin/messages-transform";
 import { createToolRegistry } from "./plugin/tool-registry";
+import { startTuiActionConsumer } from "./plugin/tui-action-consumer";
 import { type ConflictResult, detectConflicts } from "./shared/conflict-detector";
 import { log } from "./shared/logger";
 import { getAgentFallbackModels } from "./shared/model-requirements";
@@ -51,6 +55,20 @@ const plugin: Plugin = async (ctx) => {
             dreamerConfig: pluginConfig.dreamer,
             embeddingConfig: pluginConfig.embedding,
             memoryEnabled: pluginConfig.memory?.enabled === true,
+            experimentalUserMemories: pluginConfig.experimental?.user_memories?.enabled
+                ? {
+                      enabled: true,
+                      promotionThreshold:
+                          pluginConfig.experimental.user_memories?.promotion_threshold,
+                  }
+                : undefined,
+        });
+
+        // Start TUI→server action message consumer (handles recomp confirmations etc.)
+        startTuiActionConsumer({
+            client: ctx.client,
+            directory: ctx.directory,
+            config: pluginConfig,
         });
     }
 
@@ -177,7 +195,9 @@ const plugin: Plugin = async (ctx) => {
                 ),
                 [HISTORIAN_AGENT]: buildHiddenAgentConfig(
                     HISTORIAN_AGENT,
-                    COMPARTMENT_AGENT_SYSTEM_PROMPT,
+                    pluginConfig.experimental?.user_memories?.enabled
+                        ? COMPARTMENT_AGENT_SYSTEM_PROMPT + USER_OBSERVATIONS_APPENDIX
+                        : COMPARTMENT_AGENT_SYSTEM_PROMPT,
                     pluginConfig.historian,
                 ),
                 [SIDEKICK_AGENT]: buildHiddenAgentConfig(

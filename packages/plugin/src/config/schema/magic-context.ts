@@ -124,6 +124,13 @@ export interface MagicContextConfig {
         enabled: boolean;
         min_clusters: number;
     };
+    experimental: {
+        compaction_markers: boolean;
+        user_memories: {
+            enabled: boolean;
+            promotion_threshold: number;
+        };
+    };
     embedding: EmbeddingConfig;
     memory: {
         enabled: boolean;
@@ -193,6 +200,28 @@ export const MagicContextConfigSchema = z
             provider: "local",
             model: DEFAULT_LOCAL_EMBEDDING_MODEL,
         }),
+        /** Experimental features — gated behind flags, may change between releases. */
+        experimental: z
+            .object({
+                /** Inject compaction markers into OpenCode's DB so transform receives only the live tail.
+                 *  When enabled, after historian publishes compartments, a compaction boundary is written into
+                 *  OpenCode's message/part tables. Default: false. */
+                compaction_markers: z.boolean().default(false),
+                /** Extract user behavior observations from historian runs and promote recurring patterns
+                 *  to stable user memories injected into all sessions. Requires dreamer. Default: false. */
+                user_memories: z
+                    .object({
+                        /** Enable user memory extraction and promotion (default: false) */
+                        enabled: z.boolean().default(false),
+                        /** Minimum candidate observations before dreamer considers promotion (default: 3) */
+                        promotion_threshold: z.number().min(2).max(20).default(3),
+                    })
+                    .default({ enabled: false, promotion_threshold: 3 }),
+            })
+            .default({
+                compaction_markers: false,
+                user_memories: { enabled: false, promotion_threshold: 3 },
+            }),
         /** Cross-session memory configuration */
         memory: z
             .object({

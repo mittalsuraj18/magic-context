@@ -67,6 +67,17 @@ function createTestDb(): Database {
       cleared_reasoning_through_tag INTEGER DEFAULT 0
     );
   `);
+    db.run(`
+    CREATE TABLE IF NOT EXISTS plugin_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      direction TEXT NOT NULL,
+      type TEXT NOT NULL,
+      payload TEXT NOT NULL DEFAULT '{}',
+      session_id TEXT,
+      created_at INTEGER NOT NULL,
+      consumed_at INTEGER
+    );
+  `);
     ensureDreamQueueTable(db);
     return db;
 }
@@ -337,7 +348,7 @@ describe("createMagicContextCommandHandler", () => {
     });
 
     describe("ctx-recomp", () => {
-        it("sends start and completion notifications around recomp and throws the sentinel", async () => {
+        it("first call shows confirmation warning, second call within 60s runs recomp", async () => {
             const sendNotification = mock(async () => {});
             const executeRecomp = mock(async () => "## Magic Recomp\n\nRebuilt state.");
             const handler = createMagicContextCommandHandler({
@@ -347,6 +358,27 @@ describe("createMagicContextCommandHandler", () => {
                 sendNotification,
             });
 
+            // First call — shows confirmation warning, does NOT run recomp
+            await expectSentinel(
+                handler["command.execute.before"](
+                    { command: "ctx-recomp", sessionID: "ses-recomp", arguments: "" },
+                    makeOutput(""),
+                    {},
+                ),
+                "__CONTEXT_MANAGEMENT_CTX-RECOMP_HANDLED__",
+            );
+
+            expect(executeRecomp).not.toHaveBeenCalled();
+            expect(sendNotification).toHaveBeenCalledTimes(1);
+            expect(sendNotification).toHaveBeenNthCalledWith(
+                1,
+                "ses-recomp",
+                expect.stringContaining("Recomp Confirmation Required"),
+                {},
+            );
+
+            // Second call within 60s — actually runs recomp
+            sendNotification.mockClear();
             await expectSentinel(
                 handler["command.execute.before"](
                     { command: "ctx-recomp", sessionID: "ses-recomp", arguments: "" },

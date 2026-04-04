@@ -52,6 +52,7 @@ export function createSessionHooks(args: {
                 memory: pluginConfig.memory,
                 sidekick: pluginConfig.sidekick,
                 dreamer: pluginConfig.dreamer,
+                experimental: pluginConfig.experimental,
             },
         }),
     };

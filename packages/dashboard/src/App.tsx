@@ -8,6 +8,7 @@ import MemoryBrowser from "./components/MemoryBrowser/MemoryBrowser";
 import SessionViewer from "./components/SessionViewer/SessionViewer";
 import CacheDiagnostics from "./components/CacheDiagnostics/CacheDiagnostics";
 import DreamerPanel from "./components/DreamerPanel/DreamerPanel";
+import UserMemories from "./components/UserMemories/UserMemories";
 import ConfigEditor from "./components/ConfigEditor/ConfigEditor";
 import LogViewer from "./components/LogViewer/LogViewer";
 
@@ -110,6 +111,9 @@ export default function App() {
           </Show>
           <Show when={activeSection() === "dreamer"}>
             <DreamerPanel />
+          </Show>
+          <Show when={activeSection() === "user-memories"}>
+            <UserMemories />
           </Show>
           <Show when={activeSection() === "config"}>
             <ConfigEditor models={availableModels()} />

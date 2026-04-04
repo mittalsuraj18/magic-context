@@ -16,9 +16,11 @@ import {
     setPersistedReasoningWatermark,
     updateSessionMeta,
 } from "../../features/magic-context/storage";
+import { getPersistedCompactionMarkerState } from "../../features/magic-context/storage-meta-persisted";
 import type { Tagger } from "../../features/magic-context/tagger";
 import type { ContextUsage } from "../../features/magic-context/types";
 import { log, sessionLog } from "../../shared/logger";
+import { removeCompactionMarkerForSession } from "./compaction-marker-manager";
 import { checkCompartmentTrigger } from "./compartment-trigger";
 import {
     getMessageRemovedInfo,
@@ -362,6 +364,20 @@ export function createEventHandler(deps: EventHandlerDeps) {
                     );
                 }
 
+                // If the removed message is the compaction marker boundary, remove the marker
+                const markerState = getPersistedCompactionMarkerState(deps.db, info.sessionID);
+                if (
+                    markerState &&
+                    (markerState.boundaryMessageId === info.messageID ||
+                        markerState.summaryMessageId === info.messageID)
+                ) {
+                    removeCompactionMarkerForSession(deps.db, info.sessionID);
+                    sessionLog(
+                        info.sessionID,
+                        `event message.removed: cleared compaction marker (boundary or summary message removed)`,
+                    );
+                }
+
                 deps.onSessionCacheInvalidated?.(info.sessionID);
                 sessionLog(
                     info.sessionID,
@@ -384,6 +400,13 @@ export function createEventHandler(deps: EventHandlerDeps) {
             } catch (error) {
                 sessionLog(sessionId, "event session.compacted handling failed:", error);
             }
+            // Native compaction may have deleted the boundary message — remove our marker
+            // to avoid stale/orphaned rows. The next historian run will re-inject if needed.
+            try {
+                removeCompactionMarkerForSession(deps.db, sessionId);
+            } catch (error) {
+                sessionLog(sessionId, "event session.compacted marker cleanup failed:", error);
+            }
             deps.onSessionCacheInvalidated?.(sessionId);
             return;
         }
@@ -397,6 +420,8 @@ export function createEventHandler(deps: EventHandlerDeps) {
             deps.nudgePlacements.clear(sessionId);
 
             try {
+                // Read and remove compaction marker BEFORE clearSession destroys session_meta
+                removeCompactionMarkerForSession(deps.db, sessionId);
                 clearSession(deps.db, sessionId);
             } catch (error) {
                 sessionLog(sessionId, "event session.deleted persistence failed:", error);
