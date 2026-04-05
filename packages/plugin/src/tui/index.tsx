@@ -319,12 +319,10 @@ const StatusDialog = (props: { api: TuiPluginApi; s: StatusDetail }) => {
                     <R t={t()} l="Active" v={`${s().activeTags} (~${fmtBytes(s().activeBytes)})`} />
                     <R t={t()} l="Dropped" v={String(s().droppedTags)} />
                     <R t={t()} l="Total" v={String(s().totalTags)} fg={t().textMuted} />
-
                     <box marginTop={1}>
                         <text fg={t().text}><b>Pending Queue</b></text>
                     </box>
                     <R t={t()} l="Drops" v={String(s().pendingOpsCount)} fg={s().pendingOpsCount > 0 ? t().warning : t().textMuted} />
-
                     <box marginTop={1}>
                         <text fg={t().text}><b>Cache TTL</b></text>
                     </box>
@@ -332,14 +330,12 @@ const StatusDialog = (props: { api: TuiPluginApi; s: StatusDetail }) => {
                     <R t={t()} l="Last response" v={s().lastResponseTime > 0 ? `${Math.round(elapsed() / 1000)}s ago` : "never"} />
                     <R t={t()} l="Remaining" v={s().cacheExpired ? "expired" : `${Math.round(s().cacheRemainingMs / 1000)}s`} fg={s().cacheExpired ? t().warning : t().textMuted} />
                     <R t={t()} l="Auto-execute" v={s().cacheExpired ? "yes (expired)" : `at TTL or ≥${s().executeThreshold}%`} fg={t().textMuted} />
-
                     <box marginTop={1}>
                         <text fg={t().text}><b>Memory</b></text>
                     </box>
                     <R t={t()} l="Active" v={String(s().memoryCount)} fg={t().accent} />
                     <R t={t()} l="Injected" v={String(s().memoryBlockCount)} fg={t().textMuted} />
                 </box>
-
                 {/* Right column */}
                 <box flexDirection="column" flexGrow={1} flexBasis={0}>
                     <text fg={t().text}><b>Rolling Nudges</b></text>
@@ -348,13 +344,11 @@ const StatusDialog = (props: { api: TuiPluginApi; s: StatusDetail }) => {
                     <R t={t()} l="Interval" v={`${fmt(s().nudgeInterval)} tok`} fg={t().textMuted} />
                     <R t={t()} l="Next nudge after" v={`${fmt(s().nextNudgeAfter)} tok`} />
                     {s().lastNudgeBand ? <R t={t()} l="Current band" v={s().lastNudgeBand} /> : null}
-
                     <box marginTop={1}>
                         <text fg={t().text}><b>Context Details</b></text>
                     </box>
                     <R t={t()} l="Protected tags" v={String(s().protectedTagCount)} fg={t().textMuted} />
                     <R t={t()} l="Subagent" v={s().isSubagent ? "yes" : "no"} fg={t().textMuted} />
-
                     <box marginTop={1}>
                         <text fg={t().text}><b>History Compression</b></text>
                     </box>
