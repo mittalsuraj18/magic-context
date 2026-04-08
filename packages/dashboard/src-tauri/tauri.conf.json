@@ -23,10 +23,6 @@
         "transparent": false
       }
     ],
-    "trayIcon": {
-      "iconPath": "icons/tray-icon.png",
-      "iconAsTemplate": true
-    },
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https:"
     },

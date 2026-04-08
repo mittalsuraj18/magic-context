@@ -1766,6 +1766,31 @@ pub fn delete_user_memory_candidate(conn: &Connection, id: i64) -> Result<(), ru
     Ok(())
 }
 
+pub fn promote_user_memory_candidate(conn: &Connection, id: i64) -> Result<(), rusqlite::Error> {
+    let now = chrono::Utc::now().timestamp_millis();
+
+    // Read the candidate content
+    let content: String = conn.query_row(
+        "SELECT content FROM user_memory_candidates WHERE id = ?1",
+        rusqlite::params![id],
+        |row| row.get(0),
+    )?;
+
+    // Insert as a stable user memory
+    conn.execute(
+        "INSERT INTO user_memories (content, status, promoted_at, source_candidate_ids, created_at, updated_at) VALUES (?1, 'active', ?2, ?3, ?2, ?2)",
+        rusqlite::params![content, now, format!("[{}]", id)],
+    )?;
+
+    // Delete the candidate
+    conn.execute(
+        "DELETE FROM user_memory_candidates WHERE id = ?1",
+        rusqlite::params![id],
+    )?;
+
+    Ok(())
+}
+
 // ── Database health ───────────────────────────────────────
 
 pub fn get_db_health(db_path: &PathBuf) -> DbHealth {

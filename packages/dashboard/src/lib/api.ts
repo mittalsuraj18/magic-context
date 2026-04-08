@@ -228,6 +228,10 @@ export async function deleteUserMemoryCandidate(id: number): Promise<void> {
   return invoke("delete_user_memory_candidate", { id });
 }
 
+export async function promoteUserMemoryCandidate(id: number): Promise<void> {
+  return invoke("promote_user_memory_candidate", { id });
+}
+
 // ── Utilities ───────────────────────────────────────────────
 
 export function formatTimestamp(ts: number): string {

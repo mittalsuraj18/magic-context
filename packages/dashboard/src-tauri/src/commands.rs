@@ -410,6 +410,16 @@ pub fn delete_user_memory_candidate(
     db::delete_user_memory_candidate(&conn, id).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub fn promote_user_memory_candidate(
+    state: State<'_, AppState>,
+    id: i64,
+) -> Result<(), String> {
+    let path = state.get_db_path()?;
+    let conn = db::open_readwrite(&path).map_err(|e| e.to_string())?;
+    db::promote_user_memory_candidate(&conn, id).map_err(|e| e.to_string())
+}
+
 // ── Health commands ─────────────────────────────────────────
 
 #[tauri::command]

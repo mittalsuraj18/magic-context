@@ -85,6 +85,7 @@ fn main() {
             commands::dismiss_user_memory,
             commands::delete_user_memory,
             commands::delete_user_memory_candidate,
+            commands::promote_user_memory_candidate,
             // Health
             commands::get_db_health,
         ])
@@ -121,8 +122,13 @@ fn main() {
                     }
                 });
 
-            if let Some(icon) = app.default_window_icon().cloned() {
-                tray_builder = tray_builder.icon(icon);
+            {
+                let png_bytes = include_bytes!("../icons/tray-icon.png");
+                let img = image::load_from_memory(png_bytes).expect("failed to decode tray icon PNG");
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                let icon = tauri::image::Image::new_owned(rgba.into_raw(), w, h);
+                tray_builder = tray_builder.icon(icon).icon_as_template(true);
             }
 
             tray_builder.build(app)?;

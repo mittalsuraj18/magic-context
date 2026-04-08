@@ -278,22 +278,6 @@ function readOmoDisabledHooks(directory: string): Set<string> {
 }
 
 /**
- * Generate a user-facing summary of conflicts for display in dialogs/notifications.
- */
-export function formatConflictSummary(result: ConflictResult): string {
-    if (!result.hasConflict) return "";
-
-    const lines = [
-        "⚠️ Magic Context is disabled due to conflicting configuration:\n",
-        ...result.reasons.map((r) => `  • ${r}`),
-        "",
-        "Run `bunx @cortexkit/opencode-magic-context doctor` to fix,",
-        "or resolve these conflicts manually in your OpenCode config.",
-    ];
-    return lines.join("\n");
-}
-
-/**
  * Generate a short conflict summary for ignored message display.
  */
 export function formatConflictShort(result: ConflictResult): string {

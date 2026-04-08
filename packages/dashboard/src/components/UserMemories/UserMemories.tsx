@@ -6,6 +6,7 @@ import {
   dismissUserMemory,
   deleteUserMemory,
   deleteUserMemoryCandidate,
+  promoteUserMemoryCandidate,
   formatRelativeTime,
   truncate,
 } from "../../lib/api";
@@ -62,6 +63,19 @@ export default function UserMemories() {
     } catch (e: unknown) {
       setError(
         `Failed to delete candidate: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  };
+
+  const handlePromoteCandidate = async (id: number) => {
+    try {
+      setError(null);
+      await promoteUserMemoryCandidate(id);
+      refetchCandidates();
+      refetchMemories();
+    } catch (e: unknown) {
+      setError(
+        `Failed to promote candidate: ${e instanceof Error ? e.message : String(e)}`,
       );
     }
   };
@@ -128,6 +142,7 @@ export default function UserMemories() {
           value={statusFilter()}
           onChange={setStatusFilter}
           placeholder="All status"
+          align="left"
           options={[
             { value: "", label: "All status" },
             { value: "active", label: "Active" },
@@ -282,6 +297,12 @@ export default function UserMemories() {
                         "margin-top": "8px",
                       }}
                     >
+                      <button
+                        class="btn sm"
+                        onClick={() => handlePromoteCandidate(candidate.id)}
+                      >
+                        Promote
+                      </button>
                       <button
                         class="btn sm danger"
                         onClick={() => handleDeleteCandidate(candidate.id)}
