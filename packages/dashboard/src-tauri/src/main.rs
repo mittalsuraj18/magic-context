@@ -1,14 +1,14 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use magic_context_dashboard_lib::{commands, db, AppState};
+use magic_context_dashboard_lib::{commands, AppState};
 use tauri::{
-    menu::MenuBuilder,
+    menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager,
+    Emitter, Manager,
 };
 
 const OPEN_DASHBOARD_MENU_ID: &str = "open_dashboard";
-const TRIGGER_DREAMER_MENU_ID: &str = "trigger_dreamer";
+const CHECK_UPDATES_MENU_ID: &str = "check_updates";
 const QUIT_MENU_ID: &str = "quit";
 
 fn show_main_window(app: &tauri::AppHandle) {
@@ -17,24 +17,6 @@ fn show_main_window(app: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
     }
-}
-
-fn trigger_dreamer(app: &tauri::AppHandle) -> Result<(), String> {
-    let state = app.state::<AppState>();
-    let path = state.get_db_path()?;
-    let conn = db::open_readwrite(&path).map_err(|e| e.to_string())?;
-    // Resolve a real project identity from the memories table instead of using "."
-    // Include both active and permanent memories — a project with only permanent memories is still valid
-    let project_path: String = conn
-        .query_row(
-            "SELECT project_path FROM memories WHERE status IN ('active', 'permanent') GROUP BY project_path ORDER BY MAX(updated_at) DESC LIMIT 1",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(|_| "No project found — write a memory first to enable dreamer from tray".to_string())?;
-    db::enqueue_dream(&conn, &project_path, "Manual trigger from dashboard tray")
-        .map(|_| ())
-        .map_err(|e| e.to_string())
 }
 
 fn main() {
@@ -90,10 +72,45 @@ fn main() {
             commands::get_db_health,
         ])
         .setup(|app| {
+            // ── macOS app menu bar ──
+            let app_handle_for_menu = app.app_handle().clone();
+            let check_updates_item = MenuItemBuilder::with_id("app_check_updates", "Check for Updates...")
+                .build(app)?;
+            let app_submenu = SubmenuBuilder::new(app, "Magic Context")
+                .about(None)
+                .item(&check_updates_item)
+                .separator()
+                .hide()
+                .hide_others()
+                .show_all()
+                .separator()
+                .quit()
+                .build()?;
+            let edit_submenu = SubmenuBuilder::new(app, "Edit")
+                .undo()
+                .redo()
+                .separator()
+                .cut()
+                .copy()
+                .paste()
+                .select_all()
+                .build()?;
+            let app_menu = MenuBuilder::new(app)
+                .item(&app_submenu)
+                .item(&edit_submenu)
+                .build()?;
+            app.set_menu(app_menu)?;
+            app.on_menu_event(move |_app, event| {
+                if event.id().as_ref() == "app_check_updates" {
+                    let _ = app_handle_for_menu.emit("check-for-updates", ());
+                }
+            });
+
+            // ── System tray ──
             let tray_app_handle = app.app_handle().clone();
             let tray_menu = MenuBuilder::new(app)
                 .text(OPEN_DASHBOARD_MENU_ID, "Open Dashboard")
-                .text(TRIGGER_DREAMER_MENU_ID, "Trigger Dreamer")
+                .text(CHECK_UPDATES_MENU_ID, "Check for Updates...")
                 .separator()
                 .text(QUIT_MENU_ID, "Quit")
                 .build()?;
@@ -103,10 +120,9 @@ fn main() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id().as_ref() {
                     OPEN_DASHBOARD_MENU_ID => show_main_window(app),
-                    TRIGGER_DREAMER_MENU_ID => {
-                        if let Err(error) = trigger_dreamer(app) {
-                            eprintln!("failed to trigger dreamer from tray: {error}");
-                        }
+                    CHECK_UPDATES_MENU_ID => {
+                        show_main_window(app);
+                        let _ = app.emit("check-for-updates", ());
                     }
                     QUIT_MENU_ID => app.exit(0),
                     _ => {}

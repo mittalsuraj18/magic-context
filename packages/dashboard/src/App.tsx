@@ -1,7 +1,8 @@
 import { createSignal, createResource, Show, onMount, onCleanup, ErrorBoundary } from "solid-js";
 import type { NavSection, DbHealth } from "./lib/types";
 import { getDbHealth, getAvailableModels } from "./lib/api";
-import { checkForUpdate, installAndRelaunch } from "./lib/updater";
+import { checkForUpdate, installAndRelaunch, runUpdater } from "./lib/updater";
+import { listen } from "@tauri-apps/api/event";
 import Sidebar from "./components/Layout/Sidebar";
 import StatusBar from "./components/Layout/StatusBar";
 import MemoryBrowser from "./components/MemoryBrowser/MemoryBrowser";
@@ -52,6 +53,15 @@ export default function App() {
     updateInterval = setInterval(poll, UPDATE_POLL_INTERVAL);
   });
   onCleanup(() => { if (updateInterval) clearInterval(updateInterval); });
+
+  // Listen for "Check for Updates" tray menu event
+  let unlistenUpdate: (() => void) | undefined;
+  onMount(() => {
+    listen("check-for-updates", () => {
+      runUpdater({ alertOnFail: true });
+    }).then((unlisten) => { unlistenUpdate = unlisten; });
+  });
+  onCleanup(() => { unlistenUpdate?.(); });
 
   const handleInstall = async () => {
     setUpdateInstalling(true);
