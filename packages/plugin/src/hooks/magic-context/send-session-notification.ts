@@ -64,9 +64,10 @@ export async function sendIgnoredMessage(
     text: string,
     params: NotificationParams,
 ): Promise<void> {
-    // In TUI mode, show as toast instead of ignored message
-    const isTui = process.env.OPENCODE_CLIENT === "cli";
-    if (isTui) {
+    // In TUI mode, show as toast via RPC instead of ignored message.
+    // Cannot use process.env.OPENCODE_CLIENT — it's undefined in the server plugin process.
+    const { isTuiConnected: checkTui } = await import("../../shared/rpc-notifications");
+    if (checkTui()) {
         try {
             const c = client as Record<string, unknown>;
             const tui = c?.tui as Record<string, unknown> | undefined;

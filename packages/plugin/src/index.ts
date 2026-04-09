@@ -16,8 +16,10 @@ import { createEventHandler } from "./plugin/event";
 import { createSessionHooks } from "./plugin/hooks/create-session-hooks";
 import { createMessagesTransformHandler } from "./plugin/messages-transform";
 import { createToolRegistry } from "./plugin/tool-registry";
-import { startTuiActionConsumer } from "./plugin/tui-action-consumer";
+import { registerRpcHandlers } from "./plugin/rpc-handlers";
 import { type ConflictResult, detectConflicts } from "./shared/conflict-detector";
+import { getOpenCodeStorageDir } from "./shared/data-path";
+import { MagicContextRpcServer } from "./shared/rpc-server";
 import { log } from "./shared/logger";
 import { getAgentFallbackModels } from "./shared/model-requirements";
 
@@ -71,11 +73,16 @@ const plugin: Plugin = async (ctx) => {
                 : undefined,
         });
 
-        // Start TUI→server action message consumer (handles recomp confirmations etc.)
-        startTuiActionConsumer({
-            client: ctx.client,
+        // Start RPC server for TUI↔server communication (replaces SQLite plugin_messages bus)
+        const storageDir = `${getOpenCodeStorageDir()}/plugin/magic-context`;
+        const rpcServer = new MagicContextRpcServer(storageDir, ctx.directory);
+        registerRpcHandlers(rpcServer, {
             directory: ctx.directory,
             config: pluginConfig,
+            client: ctx.client,
+        });
+        rpcServer.start().catch((err) => {
+            log(`[magic-context] RPC server failed to start: ${err}`);
         });
     }
 

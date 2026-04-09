@@ -6,7 +6,7 @@ import { createMemo } from "solid-js"
 import type { TuiPlugin, TuiPluginApi, TuiThemeCurrent } from "@opencode-ai/plugin/tui"
 import { createSidebarContentSlot } from "./slots/sidebar-content"
 import packageJson from "../../package.json"
-import { closeDb, consumeTuiMessages, getCompartmentCount, loadStatusDetail, sendMessageToServer, type StatusDetail } from "./data/context-db"
+import { closeRpc, consumeTuiMessages, getCompartmentCount, initRpcClient, loadStatusDetail, requestRecomp, type StatusDetail } from "./data/context-db"
 import { detectConflicts } from "../shared/conflict-detector"
 import { fixConflicts } from "../shared/conflict-fixer"
 import { readJsoncFile } from "../shared/jsonc-parser"
@@ -407,27 +407,28 @@ function showRecompDialog(api: TuiPluginApi) {
         return
     }
 
-    const count = getCompartmentCount(sessionId)
-    api.ui.dialog.replace(() => (
-        <api.ui.DialogConfirm
-            title="⚠️ Recomp Confirmation"
-            message={[
-                `You have ${count} compartments.`,
-                "",
-                "Recomp will regenerate all compartments and facts from raw history.",
-                "This may take a long time and consume significant tokens.",
-                "",
-                "Proceed?",
-            ].join("\n")}
-            onConfirm={() => {
-                sendMessageToServer("action", { command: "recomp" }, sessionId)
-                api.ui.toast({ message: "Recomp requested — historian will start shortly", variant: "info", duration: 5000 })
-            }}
-            onCancel={() => {
-                api.ui.toast({ message: "Recomp cancelled", variant: "info", duration: 3000 })
-            }}
-        />
-    ))
+    void getCompartmentCount(sessionId).then((count) => {
+        api.ui.dialog.replace(() => (
+            <api.ui.DialogConfirm
+                title="⚠️ Recomp Confirmation"
+                message={[
+                    `You have ${count} compartments.`,
+                    "",
+                    "Recomp will regenerate all compartments and facts from raw history.",
+                    "This may take a long time and consume significant tokens.",
+                    "",
+                    "Proceed?",
+                ].join("\n")}
+                onConfirm={() => {
+                    void requestRecomp(sessionId)
+                    api.ui.toast({ message: "Recomp requested — historian will start shortly", variant: "info", duration: 5000 })
+                }}
+                onCancel={() => {
+                    api.ui.toast({ message: "Recomp cancelled", variant: "info", duration: 3000 })
+                }}
+            />
+        ))
+    })
 }
 
 function showStatusDialog(api: TuiPluginApi) {
@@ -439,22 +440,28 @@ function showStatusDialog(api: TuiPluginApi) {
 
     const directory = api.state.path.directory ?? ""
     const modelKey = getModelKeyFromMessages(api, sessionId)
-    const detail = loadStatusDetail(sessionId, directory, modelKey)
-
-    api.ui.dialog.replace(() => <StatusDialog api={api} s={detail} />)
+    void loadStatusDetail(sessionId, directory, modelKey).then((detail) => {
+        api.ui.dialog.replace(() => <StatusDialog api={api} s={detail} />)
+    })
 }
 
 const tui: TuiPlugin = async (api, _options, meta) => {
+    // Initialize RPC client for server communication
+    const directory = api.state.path.directory ?? ""
+    initRpcClient(directory)
+
     // Register sidebar slot
     api.slots.register(createSidebarContentSlot(api))
 
-    // Register TUI command palette entries for commands with richer TUI-native UI.
+    // Register TUI command palette entries (no slash field — slash commands
+    // are registered server-side so there's only one /ctx-* registration).
+    // The server detects TUI mode and sends dialog requests via RPC instead
+    // of sendIgnoredMessage.
     api.command.register(() => [
         {
             title: "Magic Context: Status",
             value: "magic-context.status",
             category: "Magic Context",
-            slash: { name: "ctx-status" },
             onSelect() {
                 showStatusDialog(api)
             },
@@ -463,17 +470,16 @@ const tui: TuiPlugin = async (api, _options, meta) => {
             title: "Magic Context: Recomp",
             value: "magic-context.recomp",
             category: "Magic Context",
-            slash: { name: "ctx-recomp" },
             onSelect() {
                 showRecompDialog(api)
             },
         },
     ])
 
-    // Poll for server→TUI messages (toasts, dialogs) every 2 seconds
+    // Poll for server→TUI messages: toasts and dialog requests.
+    // Single poller because consumeTuiMessages() is destructive (deletes consumed rows).
     const messagePoller = setInterval(() => {
-        try {
-            const messages = consumeTuiMessages()
+        void consumeTuiMessages().then((messages) => {
             for (const msg of messages) {
                 if (msg.type === "toast") {
                     const p = msg.payload
@@ -482,43 +488,35 @@ const tui: TuiPlugin = async (api, _options, meta) => {
                         variant: (p.variant as "info" | "warning" | "error" | "success") ?? "info",
                         duration: typeof p.duration === "number" ? p.duration : 5000,
                     })
-                } else if (msg.type === "dialog_confirm") {
-                    const p = msg.payload
-                    const dialogId = String(p.id ?? "")
-                    api.ui.dialog.replace(() => (
-                        <api.ui.DialogConfirm
-                            title={String(p.title ?? "Confirm")}
-                            message={String(p.message ?? "")}
-                            onConfirm={() => {
-                                sendMessageToServer("dialog_result", { id: dialogId, confirmed: true }, msg.sessionId ?? undefined)
-                            }}
-                            onCancel={() => {
-                                sendMessageToServer("dialog_result", { id: dialogId, confirmed: false }, msg.sessionId ?? undefined)
-                            }}
-                        />
-                    ))
+                } else if (msg.type === "action") {
+                    const action = msg.payload?.action
+                    if (action === "show-status-dialog") {
+                        showStatusDialog(api)
+                    } else if (action === "show-recomp-dialog") {
+                        showRecompDialog(api)
+                    }
                 }
             }
-        } catch {
+        }).catch(() => {
             // Intentional: message polling should never crash the TUI
-        }
-    }, 2000)
+        })
+    }, 500)
 
     // Clean up on dispose
     api.lifecycle.onDispose(() => {
         clearInterval(messagePoller)
-        closeDb()
+        closeRpc()
     })
 
-    const directory = api.state.path.directory ?? ""
     const conflictResult = detectConflicts(directory)
     if (conflictResult.hasConflict) {
         showConflictDialog(api, directory, conflictResult.reasons, conflictResult.conflicts)
         return
     }
 
-    // Note: tui.json detection moved to server plugin (src/index.ts) since
-    // if tui.json doesn't have our plugin, this TUI code never loads at all.
+    // Note: if TUI plugin is loaded, tui.json already has our entry.
+    // But if the user added it manually and later removes it, or if they
+    // use setup/doctor which handles tui.json, this code is already running.
 }
 
 const id = "opencode-magic-context"

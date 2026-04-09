@@ -9,6 +9,7 @@ import { runSidekick } from "../../features/magic-context/sidekick/agent";
 import { getCompartments } from "../../features/magic-context/storage";
 import type { PluginContext } from "../../plugin/types";
 import { sessionLog } from "../../shared";
+import { isTuiConnected, pushNotification } from "../../shared/rpc-notifications";
 import { executeFlush } from "./execute-flush";
 import { executeStatus } from "./execute-status";
 import type { NotificationParams } from "./send-session-notification";
@@ -274,6 +275,12 @@ export function createMagicContextCommandHandler(deps: {
             }
 
             if (isStatus) {
+                if (isTuiConnected()) {
+                    // In TUI, push an RPC action so the TUI poller shows a native dialog
+                    pushNotification("action", { action: "show-status-dialog" }, sessionId);
+                    sessionLog(sessionId, "command ctx-status: pushed show-status-dialog to TUI");
+                    throwSentinel(input.command);
+                }
                 const liveModelKey = deps.getLiveModelKey?.(sessionId);
                 const statusOutput = executeStatus(
                     deps.db,
@@ -289,12 +296,17 @@ export function createMagicContextCommandHandler(deps: {
             }
 
             if (isRecomp) {
+                if (isTuiConnected()) {
+                    // In TUI, push an RPC action so the TUI poller shows a confirmation dialog
+                    pushNotification("action", { action: "show-recomp-dialog" }, sessionId);
+                    sessionLog(sessionId, "command ctx-recomp: pushed show-recomp-dialog to TUI");
+                    throwSentinel(input.command);
+                }
                 if (!deps.executeRecomp) {
                     result =
                         "## Magic Recomp\n\n/ctx-recomp is unavailable because the recomp handler is not configured.";
                 } else {
-                    // Desktop double-tap confirmation.
-                    // TUI uses a native dialog → message bus → tui-action-consumer.ts
+                    // Desktop double-tap confirmation (no native dialog available).
                     const lastConfirmation = recompConfirmationBySession.get(sessionId);
                     const now = Date.now();
 

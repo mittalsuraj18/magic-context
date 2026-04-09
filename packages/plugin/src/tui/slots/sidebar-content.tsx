@@ -231,13 +231,14 @@ const SidebarContent = (props: {
         const sid = props.sessionID()
         if (!sid) return
         const directory = props.api.state.path.directory ?? ""
-        const data = loadSidebarSnapshot(sid, directory)
-        setSnapshot(data)
-        try {
-            props.api.renderer.requestRender()
-        } catch {
-            // Ignore render errors
-        }
+        void loadSidebarSnapshot(sid, directory).then((data) => {
+            setSnapshot(data)
+            try {
+                props.api.renderer.requestRender()
+            } catch {
+                // Ignore render errors
+            }
+        })
     }
 
     const scheduleRefresh = () => {
