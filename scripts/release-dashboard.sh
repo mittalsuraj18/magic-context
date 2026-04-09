@@ -161,16 +161,33 @@ if [[ $ATTEMPTS -ge $MAX_ATTEMPTS ]]; then
   exit 0
 fi
 
-# Step 7: Check all platform assets
+# Step 7: Wait for all platform assets
+MIN_ASSETS=10
 echo ""
-echo "→ Checking release assets..."
-ASSET_COUNT=$(gh release view "$TAG" --repo cortexkit/opencode-magic-context --json assets --jq '.assets | length' 2>/dev/null || echo "0")
-echo "  Found $ASSET_COUNT assets"
+echo "→ Waiting for all platform assets (expecting ≥$MIN_ASSETS)..."
+echo "  (checking every 30s for up to 60 minutes)"
+ASSET_ATTEMPTS=0
+ASSET_MAX=120
+ASSET_COUNT=0
+while [[ $ASSET_ATTEMPTS -lt $ASSET_MAX ]]; do
+  ASSET_COUNT=$(gh release view "$TAG" --repo cortexkit/opencode-magic-context --json assets --jq '.assets | length' 2>/dev/null || echo "0")
 
-if [[ "$ASSET_COUNT" -lt 10 ]]; then
-  echo "  ⚠ Expected ~17 assets (4 platforms × ~4 files + latest.json)"
-  echo "  → Some platforms may still be building. Wait and check manually."
-  read -rp "  Publish anyway? [y/N] " confirm
+  if [[ "$ASSET_COUNT" -ge "$MIN_ASSETS" ]]; then
+    echo "  ✓ Found $ASSET_COUNT assets — all platforms built"
+    break
+  fi
+
+  ASSET_ATTEMPTS=$((ASSET_ATTEMPTS + 1))
+  if [[ $((ASSET_ATTEMPTS % 4)) -eq 0 ]]; then
+    ELAPSED=$((ASSET_ATTEMPTS * 30 / 60))
+    echo "  ... $ASSET_COUNT assets so far (${ELAPSED}m elapsed)"
+  fi
+  sleep 30
+done
+
+if [[ "$ASSET_COUNT" -lt "$MIN_ASSETS" ]]; then
+  echo "  ⚠ Only $ASSET_COUNT assets after waiting. Some platforms may have failed."
+  read -r -p "  Publish with $ASSET_COUNT assets? [y/N] " confirm </dev/tty
   if [[ "$confirm" != "y" && "$confirm" != "Y" ]]; then
     echo "  Skipping publish. Run manually: gh release edit $TAG --draft=false"
     exit 0
@@ -183,7 +200,7 @@ echo "→ Enter release notes (end with Ctrl-D or empty line):"
 echo "  (markdown supported)"
 echo ""
 NOTES=""
-while IFS= read -r line; do
+while IFS= read -r line </dev/tty; do
   [[ -z "$line" ]] && break
   NOTES="$NOTES$line
 "
