@@ -1,11 +1,12 @@
+import { OhMyPiAdapter } from "./oh-my-pi";
 import { OpenCodeAdapter } from "./opencode";
 import { PiAdapter } from "./pi";
 import type { HarnessAdapter, HarnessKind } from "./types";
 
 export type { HarnessAdapter, HarnessKind } from "./types";
-export { OpenCodeAdapter, PiAdapter };
+export { OhMyPiAdapter, OpenCodeAdapter, PiAdapter };
 
-const ALL: HarnessAdapter[] = [new OpenCodeAdapter(), new PiAdapter()];
+const ALL: HarnessAdapter[] = [new OpenCodeAdapter(), new PiAdapter(), new OhMyPiAdapter()];
 
 /** Every registered adapter. */
 export function getAllAdapters(): HarnessAdapter[] {

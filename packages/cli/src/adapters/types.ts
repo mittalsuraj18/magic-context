@@ -12,7 +12,7 @@
  * structures; async work lives in the command layer.
  */
 
-export type HarnessKind = "opencode" | "pi";
+export type HarnessKind = "opencode" | "pi" | "oh-my-pi";
 
 export interface HarnessConfigPaths {
     /** Primary config dir (e.g. `~/.config/opencode`, `~/.pi/agent`). */

@@ -14,6 +14,7 @@ import { getInstalledAdapters } from "../adapters";
 import type { HarnessAdapter } from "../adapters/types";
 import { resolveAdaptersForCommand } from "../lib/harness-select";
 import { confirm, intro, log, outro, selectMany, spinner } from "../lib/prompts";
+import { doctor as runOhMyPiDoctor } from "./doctor-oh-my-pi";
 import { runDoctor as runOpenCodeDoctor } from "./doctor-opencode";
 import { doctor as runPiDoctor } from "./doctor-pi";
 
@@ -61,6 +62,12 @@ async function dispatchDoctor(adapter: HarnessAdapter, options: RunDoctorOptions
             if (options.force) piArgs.push("--force");
             if (options.issue) piArgs.push("--issue");
             return runPiDoctor(piArgs);
+        }
+        case "oh-my-pi": {
+            const ohMyPiArgs: string[] = [];
+            if (options.force) ohMyPiArgs.push("--force");
+            if (options.issue) ohMyPiArgs.push("--issue");
+            return runOhMyPiDoctor(ohMyPiArgs);
         }
     }
 }

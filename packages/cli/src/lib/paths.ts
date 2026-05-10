@@ -117,6 +117,29 @@ export function getPiUserExtensionsPath(): string {
 }
 
 // ============================================================================
+// oh-my-pi paths
+// ============================================================================
+
+/** oh-my-pi's per-user agent dir; overridable via OMP_AGENT_DIR. */
+export function getOhMyPiAgentConfigDir(): string {
+    const envDir = process.env.OMP_AGENT_DIR?.trim();
+    if (envDir) return envDir;
+    return join(homedir(), ".omp", "agent");
+}
+
+export function getOhMyPiUserConfigPath(): string {
+    return join(getOhMyPiAgentConfigDir(), "magic-context.jsonc");
+}
+
+/**
+ * oh-my-pi's `omp install <source>` command persists extension package sources in
+ * the `packages` array inside ~/.omp/agent/settings.json.
+ */
+export function getOhMyPiUserExtensionsPath(): string {
+    return join(getOhMyPiAgentConfigDir(), "settings.json");
+}
+
+// ============================================================================
 // Plugin / shared paths
 // ============================================================================
 

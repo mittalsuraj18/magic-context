@@ -15,7 +15,7 @@ function parseHarnessFlag(argv: string[]): HarnessKind | null {
     const idx = argv.indexOf("--harness");
     if (idx === -1 || idx === argv.length - 1) return null;
     const value = argv[idx + 1];
-    if (value === "opencode" || value === "pi") return value;
+    if (value === "opencode" || value === "pi" || value === "oh-my-pi") return value;
     return null;
 }
 
@@ -47,7 +47,7 @@ export async function resolveAdaptersForCommand(
     const installed = getInstalledAdapters();
 
     if (installed.length === 0) {
-        log.warn("No supported harness was detected on PATH (opencode, pi).");
+        log.warn("No supported harness was detected on PATH (opencode, pi, oh-my-pi).");
         const pick = await selectOne(`Which harness do you want to ${options.verb}?`, [
             {
                 label: "OpenCode",
@@ -58,6 +58,11 @@ export async function resolveAdaptersForCommand(
                 label: "Pi",
                 value: "pi",
                 hint: "@cortexkit/pi-magic-context",
+            },
+            {
+                label: "Oh My Pi",
+                value: "oh-my-pi",
+                hint: "@cortexkit/oh-my-pi-magic-context",
             },
         ]);
         return [getAdapter(pick as HarnessKind)];

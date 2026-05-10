@@ -13,6 +13,7 @@
 import type { HarnessAdapter } from "../adapters/types";
 import { resolveAdaptersForCommand } from "../lib/harness-select";
 import { intro, log, note, outro } from "../lib/prompts";
+import { runSetup as runOhMyPiSetup } from "./setup-oh-my-pi";
 import { runSetup as runOpenCodeSetup } from "./setup-opencode";
 import { runSetup as runPiSetup } from "./setup-pi";
 
@@ -58,6 +59,8 @@ async function dispatchSetup(adapter: HarnessAdapter): Promise<number> {
             return runOpenCodeSetup();
         case "pi":
             return runPiSetup();
+        case "oh-my-pi":
+            return runOhMyPiSetup();
     }
 }
 
@@ -77,6 +80,16 @@ function printNextSteps(adapter: HarnessAdapter): void {
             [
                 "Restart your Pi session so the extension registers.",
                 "Verify with: npx @cortexkit/magic-context@latest doctor --harness pi",
+            ].join("\n"),
+            "Next steps",
+        );
+        return;
+    }
+    if (adapter.kind === "oh-my-pi") {
+        note(
+            [
+                "Restart your Oh My Pi session so the extension registers.",
+                "Verify with: npx @cortexkit/magic-context@latest doctor --harness oh-my-pi",
             ].join("\n"),
             "Next steps",
         );

@@ -3,12 +3,12 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export interface PiBinaryInfo {
+export interface OhMyPiBinaryInfo {
     path: string;
     source: "path" | "home";
 }
 
-export const PI_PACKAGE_SOURCE = "npm:@cortexkit/pi-magic-context";
+export const OH_MY_PI_PACKAGE_SOURCE = "npm:@cortexkit/oh-my-pi-magic-context";
 
 const STATIC_MODELS = [
     "anthropic/claude-haiku-4-5",
@@ -41,11 +41,11 @@ function commandExists(command: string, args: string[]): string | null {
     }
 }
 
-export function detectPiBinary(): PiBinaryInfo | null {
+export function detectOhMyPiBinary(): OhMyPiBinaryInfo | null {
     const fromPath =
         process.platform === "win32"
-            ? commandExists("where", ["pi"])
-            : commandExists("which", ["pi"]);
+            ? commandExists("where", ["omp"])
+            : commandExists("which", ["omp"]);
     if (fromPath) {
         const first = fromPath.split(/\r?\n/).find(Boolean);
         if (first) return { path: first, source: "path" };
@@ -53,20 +53,20 @@ export function detectPiBinary(): PiBinaryInfo | null {
 
     const homeCandidate =
         process.platform === "win32"
-            ? join(homedir(), ".pi", "bin", "pi.cmd")
-            : join(homedir(), ".pi", "bin", "pi");
+            ? join(homedir(), ".omp", "bin", "omp.cmd")
+            : join(homedir(), ".omp", "bin", "omp");
     if (existsSync(homeCandidate)) return { path: homeCandidate, source: "home" };
 
     return null;
 }
 
-export function getPiVersion(piPath: string): string | null {
+export function getOhMyPiVersion(ohMyPiPath: string): string | null {
     // Pi >= 0.71.x writes `--version` output to stderr, not stdout. Use
     // spawnSync (not execFileSync) so we get both streams back even on
     // a clean exit. Prefer stdout when present so future Pi versions
     // that switch back to stdout still work.
     try {
-        const result = spawnSync(piPath, ["--version"], {
+        const result = spawnSync(ohMyPiPath, ["--version"], {
             encoding: "utf-8",
             timeout: 10_000,
         });
@@ -80,9 +80,9 @@ export function getPiVersion(piPath: string): string | null {
     }
 }
 
-function runPi(piPath: string, args: string[]): string | null {
+function runOhMyPi(ohMyPiPath: string, args: string[]): string | null {
     try {
-        return execFileSync(piPath, args, {
+        return execFileSync(ohMyPiPath, args, {
             encoding: "utf-8",
             stdio: ["ignore", "pipe", "ignore"],
             timeout: 20_000,
@@ -110,8 +110,11 @@ export function parseModelListOutput(output: string): string[] {
     return [...models];
 }
 
-export function getAvailableModels(piPath: string): string[] {
-    const outputs = [runPi(piPath, ["models", "list"]), runPi(piPath, ["--list-models"])];
+export function getAvailableModels(ohMyPiPath: string): string[] {
+    const outputs = [
+        runOhMyPi(ohMyPiPath, ["models", "list"]),
+        runOhMyPi(ohMyPiPath, ["--list-models"]),
+    ];
     for (const output of outputs) {
         if (!output) continue;
         const models = parseModelListOutput(output);
