@@ -208,6 +208,62 @@ npx @cortexkit/magic-context@latest doctor --harness pi
 
 ---
 
+## Oh My Pi (local development)
+
+Magic Context also supports [oh-my-pi](https://github.com/can1357/oh-my-pi), a fork of Pi. The oh-my-pi plugin shares the **same SQLite database** as the OpenCode and Pi plugins, so project memories and dreamer state are visible across all three harnesses.
+
+> The oh-my-pi extension is currently available for **local development** (installing from a cloned repository). Published npm installation will be available once the package is published.
+
+### Local install from cloned repo
+
+```bash
+# 1. Clone and build
+git clone https://github.com/cortexkit/magic-context.git
+cd magic-context
+bun install
+bun run --cwd packages/oh-my-pi-plugin build
+
+# 2. Create an isolated plugin copy
+mkdir -p /tmp/oh-my-pi-magic-context-plugin
+cp -r packages/oh-my-pi-plugin/dist/* /tmp/oh-my-pi-magic-context-plugin/
+
+# 3. Register with oh-my-pi
+cat > ~/.omp/plugins/package.json << 'EOF'
+{
+  "name": "omp-plugins",
+  "private": true,
+  "dependencies": {
+    "@cortexkit/oh-my-pi-magic-context": "file:/tmp/oh-my-pi-magic-context-plugin"
+  }
+}
+EOF
+cd ~/.omp/plugins && npm install
+
+# 4. Enable in lock file
+cat > ~/.omp/plugins/omp-plugins.lock.json << 'EOF'
+{
+  "plugins": {
+    "@cortexkit/oh-my-pi-magic-context": {
+      "version": "0.17.2",
+      "enabledFeatures": null,
+      "enabled": true
+    }
+  },
+  "settings": {}
+}
+EOF
+
+# 5. Verify
+omp plugin list
+omp plugin doctor
+
+# 6. Restart oh-my-pi and enjoy
+```
+
+See [`packages/oh-my-pi-plugin/README.md`](packages/oh-my-pi-plugin/README.md) for detailed instructions, rebuild aliases, and troubleshooting.
+
+---
+
 ## What Your Agent Gets
 
 Magic Context injects structured context automatically and gives the agent five tools.
