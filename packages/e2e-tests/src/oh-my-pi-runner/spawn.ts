@@ -217,16 +217,16 @@ export async function spawnOhMyPiTurn(
     const ompCLI = findOhMyPiCLI();
     const isJSCli = ompCLI.endsWith(".js");
 
-    const args = isJSCli
+        const extensionEntry = join(env.pluginDir, "dist", "index.js");
+        const args = isJSCli
         ? [
               ompCLI,
               "--print",
               "--mode",
               "json",
               ...(opts.continueSession ? ["--continue"] : []),
-              "--no-extensions",
               "--extension",
-              env.pluginDir,
+              extensionEntry,
               "--no-skills",
               "--no-prompt-templates",
               "--no-themes",
@@ -241,9 +241,8 @@ export async function spawnOhMyPiTurn(
               "--mode",
               "json",
               ...(opts.continueSession ? ["--continue"] : []),
-              "--no-extensions",
               "--extension",
-              env.pluginDir,
+              extensionEntry,
               "--no-skills",
               "--no-prompt-templates",
               "--no-themes",

@@ -156,7 +156,7 @@ Both are merged through a Zod schema. Invalid fields fall back to defaults — b
 }
 ```
 
-For the full configuration reference, see [CONFIGURATION.md](https://github.com/cortexkit/magic-context/blob/master/CONFIGURATION.md) in the main repository.
+For the full oh-my-pi configuration reference, see [CONFIGURATION.md](./CONFIGURATION.md) in this directory. It covers every setting in detail with examples.
 
 ---
 
@@ -171,6 +171,37 @@ All commands trigger `triggerTurn: false` (never sent to the LLM):
 | `/ctx-recomp` | Rebuild compartments from raw history (heavy operation) |
 | `/ctx-dream` | Trigger a dream run on demand |
 | `/ctx-aug` | Augment your next prompt with sidekick-retrieved memories |
+
+### Quick Configuration Example
+
+Enable memory + dreamer for automatic background maintenance:
+
+```jsonc
+// ~/.omp/agent/magic-context.jsonc
+{
+  "enabled": true,
+  "ctx_reduce_enabled": true,
+  "memory": {
+    "enabled": true,
+    "auto_promote": true,
+    "injection_budget_tokens": 8000
+  },
+  "embedding": {
+    "provider": "local"
+  },
+  "historian": {
+    "model": "anthropic/claude-haiku-4-5"
+  },
+  "dreamer": {
+    "enabled": true,
+    "schedule": "02:00-06:00",
+    "model": "anthropic/claude-haiku-4-5",
+    "tasks": ["consolidate", "verify", "archive-stale", "improve", "maintain-docs"]
+  }
+}
+```
+
+See [CONFIGURATION.md](./CONFIGURATION.md) for the complete setting reference.
 
 ---
 
