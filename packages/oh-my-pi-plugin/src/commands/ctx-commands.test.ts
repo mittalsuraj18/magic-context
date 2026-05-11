@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { replaceAllCompartmentState } from "@magic-context/core/features/magic-context/compartment-storage";
 import { enqueueDream } from "@magic-context/core/features/magic-context/dreamer/queue";
+import { resolveProjectIdentity } from "@magic-context/core/features/magic-context/memory/project-identity";
 import { initializeDatabase } from "@magic-context/core/features/magic-context/storage-db";
 import { queuePendingOp } from "@magic-context/core/features/magic-context/storage-ops";
 import { insertTag } from "@magic-context/core/features/magic-context/storage-tags";
@@ -163,14 +164,53 @@ describe("Pi Magic Context commands", () => {
 		registerCtxDreamCommand(pi as never, {
 			db,
 			projectDir: "/tmp/project",
-			projectIdentity: "/tmp/project",
+			projectIdentity: "git:test-project",
 		});
 		await handlers.get("ctx-dream")?.("", createCtx());
 
 		expect(sent[0]?.message.customType).toBe("ctx-status");
 		expect(sent[0]?.message.content).toContain("/ctx-dream");
 		expect(sent[0]?.options?.triggerTurn).toBe(false);
-		expect(enqueueDream(db, "/tmp/project", "manual")).toBeNull();
+
+		// After the first /ctx-dream call, the queue entry for the
+		// RUNTIME projectIdentity (resolved from ctx.cwd) should exist.
+		// The static projectIdentity passed to registerCtxDreamCommand
+		// is only used as fallback; the handler resolves from ctx.cwd.
+		const runtimeIdentity = resolveProjectIdentity("/tmp/project");
+		expect(enqueueDream(db, runtimeIdentity, "manual")).toBeNull();
+	});
+
+	it("/ctx-dream resolves projectIdentity from ctx.cwd at runtime", async () => {
+		const db = createDb();
+		const { pi, handlers, sent } = createMockPi();
+
+		registerCtxDreamCommand(pi as never, {
+			db,
+			projectDir: "/tmp/project",
+			projectIdentity: "git:static-project",
+		});
+
+		// Simulate the user having changed directories after plugin load.
+		// ctx.cwd is different from the static projectDir.
+		const ctx = {
+			...createCtx(),
+			cwd: "/tmp/other-project",
+		};
+		await handlers.get("ctx-dream")?.("", ctx);
+
+		// The command should have enqueued using the runtime cwd,
+		// NOT the static projectIdentity.
+		expect(sent[0]?.message.customType).toBe("ctx-status");
+		// The message should reference the runtime directory,
+		// not the static one.
+		expect(sent[0]?.message.content).not.toContain("git:static-project");
+
+		// Verify it enqueued for the runtime project (resolved from ctx.cwd).
+		const runtimeIdentity = resolveProjectIdentity("/tmp/other-project");
+		// Should already be queued → returns null.
+		expect(enqueueDream(db, runtimeIdentity, "manual")).toBeNull();
+		// The static project should NOT be queued → returns a new entry.
+		expect(enqueueDream(db, "git:static-project", "manual")).not.toBeNull();
 	});
 
 	it("registers /ctx-recomp and requires confirmation before running", async () => {
