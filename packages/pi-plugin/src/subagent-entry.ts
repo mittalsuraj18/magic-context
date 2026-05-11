@@ -51,7 +51,7 @@ import type { ContextDatabase } from "@magic-context/core/features/magic-context
 import { openDatabase } from "@magic-context/core/features/magic-context/storage-db";
 import { setHarness } from "@magic-context/core/shared/harness";
 import { log } from "@magic-context/core/shared/logger";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { loadPiConfig } from "./config";
 import { registerMagicContextTools } from "./tools";
 

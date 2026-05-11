@@ -14,9 +14,9 @@
  * tables carry a `harness` column ('opencode' or 'pi') so per-session
  * data stays correctly attributed.
  *
- * Config: read from $cwd/.pi/magic-context.jsonc (project) and
- *   ~/.pi/agent/magic-context.jsonc (user) via `loadPiConfig()`. Falls
- *   back to schema defaults when neither file exists.
+ * Config: read from $cwd/.omp/magic-context.jsonc (project) and
+ *   ~/.omp/agent/magic-context.jsonc (user) via `loadPiConfig()`. Falls
+ *   back to legacy .pi paths, then schema defaults when neither file exists.
  */
 
 import { createRequire } from "node:module";
@@ -51,7 +51,7 @@ import {
 import { getMagicContextStorageDir } from "@magic-context/core/shared/data-path";
 import { setHarness } from "@magic-context/core/shared/harness";
 import { log } from "@magic-context/core/shared/logger";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import {
 	type PiSidekickConfig,
 	registerCtxAugCommand,
@@ -326,8 +326,8 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	);
 
 	// Step 5b: load the user's full magic-context.jsonc config. The loader
-	// reads $cwd/.pi/magic-context.jsonc and ~/.pi/agent/magic-context.jsonc
-	// (Pi convention), validates them through the shared Zod schema, falls
+	// reads $cwd/.omp/magic-context.jsonc and ~/.omp/agent/magic-context.jsonc
+	// (OMP convention), validates them through the shared Zod schema, falls
 	// back to defaults for invalid fields per-key, and returns merged
 	// config + warnings.
 	//
@@ -694,20 +694,21 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 				isCacheBusting,
 			});
 
-			// Compose the final system prompt: base prompt from Pi + our
+			// Compose the final system prompt: base prompt from OMP + our
 			// magic-context block. We always run hash detection on the
 			// composed string so even sessions with no data block (e.g.
 			// memories disabled, no docs, no key files) still get
 			// sticky-date freezing and hash-change tracking.
+			const baseSystemPrompt = event.systemPrompt.join("\n\n");
 			const composedPrompt = block
-				? `${event.systemPrompt}\n\n${block}`
-				: event.systemPrompt;
+				? `${baseSystemPrompt}\n\n${block}`
+				: baseSystemPrompt;
 
 			if (!sessionId) {
 				// No session id yet — return the composed prompt without
 				// cache logic. The next turn (with a session id) will
 				// compute the first hash and set sticky date.
-				if (block) return { systemPrompt: composedPrompt };
+				if (block) return { systemPrompt: [composedPrompt] };
 				return;
 			}
 
@@ -740,7 +741,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 				clearSystemPromptRefresh(sessionId);
 			}
 
-			return { systemPrompt: result.systemPrompt };
+			return { systemPrompt: [result.systemPrompt] };
 		} catch (error) {
 			warn("failed to build magic-context block:", error);
 			return;

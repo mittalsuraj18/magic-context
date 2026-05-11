@@ -24,8 +24,8 @@ import {
 } from "@magic-context/core/features/magic-context/storage";
 import { getErrorMessage } from "@magic-context/core/shared/error-message";
 import { CTX_REDUCE_DESCRIPTION } from "@magic-context/core/tools/ctx-reduce/constants";
-import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
-import { type Static, Type } from "typebox";
+import type { ToolDefinition } from "@oh-my-pi/pi-coding-agent";
+import { type Static, Type } from "@sinclair/typebox";
 
 const ParamsSchema = Type.Object({
 	drop: Type.Optional(

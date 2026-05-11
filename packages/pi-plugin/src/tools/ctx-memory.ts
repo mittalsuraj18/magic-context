@@ -55,8 +55,8 @@ import { computeNormalizedHash } from "@magic-context/core/features/magic-contex
 import { resolveProjectIdentity } from "@magic-context/core/features/magic-context/memory/project-identity";
 import type { ContextDatabase } from "@magic-context/core/features/magic-context/storage";
 import { log } from "@magic-context/core/shared/logger";
-import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
-import { type Static, Type } from "typebox";
+import type { ToolDefinition } from "@oh-my-pi/pi-coding-agent";
+import { type Static, Type } from "@sinclair/typebox";
 
 const DEFAULT_LIST_LIMIT = 10;
 const VALID_CATEGORIES = new Set<string>(CATEGORY_PRIORITY);

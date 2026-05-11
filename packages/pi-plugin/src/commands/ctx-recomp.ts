@@ -10,7 +10,7 @@ import type { RawMessageProvider } from "@magic-context/core/hooks/magic-context
 import { setRawMessageProvider } from "@magic-context/core/hooks/magic-context/read-session-chunk";
 import { describeError } from "@magic-context/core/shared/error-message";
 import type { SubagentRunner } from "@magic-context/core/shared/subagent-runner";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import {
 	signalPiHistoryRefresh,
 	signalPiPendingMaterialization,

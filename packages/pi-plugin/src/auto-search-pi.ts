@@ -57,7 +57,7 @@ import { unifiedSearch } from "@magic-context/core/features/magic-context/search
 import { buildAutoSearchHint } from "@magic-context/core/hooks/magic-context/auto-search-hint";
 import { log, sessionLog } from "@magic-context/core/shared/logger";
 import type { Database } from "@magic-context/core/shared/sqlite";
-import type { ContextEvent } from "@mariozechner/pi-coding-agent";
+import type { ContextEvent } from "@oh-my-pi/pi-coding-agent";
 
 /**
  * Pi's full AgentMessage union, sourced from the live SDK ContextEvent

@@ -2,7 +2,7 @@ import type { ContextDatabase } from "@magic-context/core/features/magic-context
 import type {
 	ExtensionAPI,
 	ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
+} from "@oh-my-pi/pi-coding-agent";
 
 const STATUS_KEY = "magic-context";
 const RECENT_FAILURE_MS = 60_000;

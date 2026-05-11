@@ -160,18 +160,94 @@ describe("Pi Magic Context commands", () => {
 	it("registers /ctx-dream and reports existing or new queue state", async () => {
 		const db = createDb();
 		const { pi, handlers, sent } = createMockPi();
+		let ranDream = false;
 
 		registerCtxDreamCommand(pi as never, {
 			db,
 			projectDir: "/tmp/project",
 			projectIdentity: "/tmp/project",
+			isDreamerRegistered: () => true,
+			runDreamForProject: async () => {
+				ranDream = true;
+				return null;
+			},
 		});
 		await handlers.get("ctx-dream")?.("", createCtx());
 
 		expect(sent[0]?.message.customType).toBe("ctx-status");
 		expect(sent[0]?.message.content).toContain("/ctx-dream");
 		expect(sent[0]?.options?.triggerTurn).toBe(false);
-		expect(enqueueDream(db, "/tmp/project", "manual")).toBeNull();
+		expect(ranDream).toBe(true);
+	});
+
+	it("does not enqueue /ctx-dream when dreamer is disabled", async () => {
+		const db = createDb();
+		const { pi, handlers, sent } = createMockPi();
+
+		registerCtxDreamCommand(pi as never, {
+			db,
+			projectDir: "/tmp/project",
+			projectIdentity: "/tmp/project",
+			isDreamerRegistered: () => false,
+		});
+		await handlers.get("ctx-dream")?.("", createCtx());
+
+		expect(sent[0]?.message.content).toContain("Dreamer is not enabled");
+		expect(enqueueDream(db, "/tmp/project", "manual")).not.toBeNull();
+	});
+
+	it("drains an existing queued /ctx-dream row when dreamer is registered", async () => {
+		const db = createDb();
+		const { pi, handlers, sent } = createMockPi();
+		const existing = enqueueDream(db, "/tmp/project", "manual");
+		let ranDream = false;
+
+		registerCtxDreamCommand(pi as never, {
+			db,
+			projectDir: "/tmp/project",
+			projectIdentity: "/tmp/project",
+			isDreamerRegistered: () => true,
+			runDreamForProject: async () => {
+				ranDream = true;
+				return null;
+			},
+		});
+		await handlers.get("ctx-dream")?.("", createCtx());
+
+		expect(existing).not.toBeNull();
+		expect(ranDream).toBe(true);
+		expect(sent[0]?.message.content).toContain("attempting to drain");
+	});
+
+	it("reports dream lease contention as busy instead of complete", async () => {
+		const db = createDb();
+		const { pi, handlers, sent } = createMockPi();
+
+		registerCtxDreamCommand(pi as never, {
+			db,
+			projectDir: "/tmp/project",
+			projectIdentity: "/tmp/project",
+			isDreamerRegistered: () => true,
+			runDreamForProject: async () => ({
+				startedAt: 1000,
+				finishedAt: 1000,
+				holderId: "new-holder",
+				smartNotesSurfaced: 0,
+				smartNotesPending: 0,
+				tasks: [
+					{
+						name: "lease",
+						durationMs: 0,
+						result: null,
+						error: "Dream lease is already held by old-holder",
+					},
+				],
+			}),
+		});
+		await handlers.get("ctx-dream")?.("", createCtx());
+
+		expect(sent.at(-1)?.message.content).toContain("Dreamer is busy");
+		expect(sent.at(-1)?.message.content).not.toContain("Dream run complete");
 	});
 
 	it("registers /ctx-recomp and requires confirmation before running", async () => {

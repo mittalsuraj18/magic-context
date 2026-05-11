@@ -9,7 +9,7 @@ import { getTagsBySession } from "@magic-context/core/features/magic-context/sto
 import { executeStatus } from "@magic-context/core/hooks/magic-context/execute-status";
 import { formatBytes } from "@magic-context/core/hooks/magic-context/format-bytes";
 import { describeError } from "@magic-context/core/shared/error-message";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { showStatusDialog } from "../dialogs/status-dialog";
 import { resolveSessionId, sendCtxStatusMessage } from "./pi-command-utils";
 

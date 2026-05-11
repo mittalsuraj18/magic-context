@@ -1,7 +1,7 @@
 import type { ContextDatabase } from "@magic-context/core/features/magic-context/storage";
 import { getPendingOps } from "@magic-context/core/features/magic-context/storage";
 import { executeFlush } from "@magic-context/core/hooks/magic-context/execute-flush";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import {
 	signalPiHistoryRefresh,
 	signalPiPendingMaterialization,

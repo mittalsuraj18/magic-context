@@ -29,8 +29,8 @@ import {
 	setNoteLastReadAt,
 	updateNote,
 } from "@magic-context/core/features/magic-context/storage";
-import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
-import { type Static, Type } from "typebox";
+import type { ToolDefinition } from "@oh-my-pi/pi-coding-agent";
+import { type Static, Type } from "@sinclair/typebox";
 
 const FILTER_VALUES = [
 	"active",

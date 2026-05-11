@@ -1,5 +1,5 @@
 import { copyFileSync, cpSync, existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
     getLegacyOpenCodeMagicContextStorageDir,
     getMagicContextStorageDir,
@@ -604,8 +604,10 @@ function ensureColumn(db: Database, table: string, column: string, definition: s
  * (server plugin: registers a startup warning + skips the runtime;
  * Pi plugin: logs warning + skips the extension).
  */
-export function openDatabase(): Database {
-    const { dbDir, dbPath } = resolveDatabasePath();
+export function openDatabase(databasePath?: string): Database {
+    const resolved = resolveDatabasePath();
+    const dbPath = databasePath ?? resolved.dbPath;
+    const dbDir = databasePath ? dirname(databasePath) : resolved.dbDir;
     const existing = databases.get(dbPath);
     if (existing) {
         if (!persistenceByDatabase.has(existing)) {

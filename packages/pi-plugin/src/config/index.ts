@@ -29,14 +29,27 @@ interface LoadedConfigFile {
 const CONFIG_FILE_NAME = "magic-context";
 
 function getProjectConfigPaths(cwd: string): string[] {
-	const basePath = join(cwd, ".pi", CONFIG_FILE_NAME);
-	return [`${basePath}.jsonc`, `${basePath}.json`];
+	const ompBasePath = join(cwd, ".omp", CONFIG_FILE_NAME);
+	const legacyPiBasePath = join(cwd, ".pi", CONFIG_FILE_NAME);
+	return [
+		`${ompBasePath}.jsonc`,
+		`${ompBasePath}.json`,
+		`${legacyPiBasePath}.jsonc`,
+		`${legacyPiBasePath}.json`,
+	];
 }
 
 function getUserConfigPaths(): string[] {
 	const home = process.env.HOME ?? homedir();
-	const basePath = join(home, ".pi", "agent", CONFIG_FILE_NAME);
-	return [`${basePath}.jsonc`, `${basePath}.json`];
+	const agentDir = process.env.PI_CODING_AGENT_DIR?.trim();
+	const ompBasePath = join(agentDir || join(home, ".omp", "agent"), CONFIG_FILE_NAME);
+	const legacyPiBasePath = join(home, ".pi", "agent", CONFIG_FILE_NAME);
+	return [
+		`${ompBasePath}.jsonc`,
+		`${ompBasePath}.json`,
+		`${legacyPiBasePath}.jsonc`,
+		`${legacyPiBasePath}.json`,
+	];
 }
 
 function resolveFirstExisting(paths: string[]): string | undefined {

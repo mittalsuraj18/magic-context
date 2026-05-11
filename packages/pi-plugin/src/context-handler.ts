@@ -91,7 +91,7 @@ import type {
 	ContextEvent,
 	ExtensionAPI,
 	ExtensionContext,
-} from "@mariozechner/pi-coding-agent";
+} from "@oh-my-pi/pi-coding-agent";
 import {
 	clearAutoSearchForPiSession,
 	runAutoSearchHintForPi,
@@ -364,7 +364,7 @@ export function consumePendingMaterialization(sessionId: string): boolean {
 /**
  * Pi's full AgentMessage union (user | assistant | toolResult | custom).
  * Sourced from the live ContextEvent payload so the type stays in sync
- * with @mariozechner/pi-coding-agent without us re-declaring it.
+ * with @oh-my-pi/pi-coding-agent without us re-declaring it.
  *
  * The nudge / note-nudge / auto-search helpers below operate on this
  * union but only inspect/mutate user and (rarely) assistant messages —
@@ -632,7 +632,7 @@ function resolveSessionId(ctx: ExtensionContext): string | undefined {
  * `buildSessionContext`'s compaction-aware emission order so the
  * resulting `entryIds[]` lines up with `event.messages` exactly.
  *
- * Algorithm — mirrors @mariozechner/pi-coding-agent's
+ * Algorithm — mirrors @oh-my-pi/pi-coding-agent's
  * `buildSessionContext` implementation (see node_modules/.../core/
  * session-manager.js:108 and our copy of the algorithm in this repo's
  * earlier debug session for `ses_21cba3abaffenqSinaCFbAFF3E`):

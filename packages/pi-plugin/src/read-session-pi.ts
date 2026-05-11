@@ -11,7 +11,7 @@
  * # Shape mapping
  *
  * Pi's session branch is a `SessionEntry[]` from
- * `@mariozechner/pi-coding-agent` core/session-manager.d.ts:
+ * `@oh-my-pi/pi-coding-agent` core/session-manager.d.ts:
  *
  *   SessionMessageEntry { id, parentId, type: "message", timestamp,
  *                         message: AgentMessage }
@@ -70,7 +70,7 @@
  */
 
 import type { RawMessage } from "@magic-context/core/hooks/magic-context/read-session-raw";
-import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
 /**
  * Read the active Pi session branch and synthesize an OpenCode-shape

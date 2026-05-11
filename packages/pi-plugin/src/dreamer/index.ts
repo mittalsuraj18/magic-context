@@ -180,6 +180,10 @@ export async function runPiDreamForProject(
 	return registration.runOnce();
 }
 
+export function isPiDreamerProjectRegistered(projectIdentity: string): boolean {
+	return registeredProjects.has(projectIdentity);
+}
+
 /** Cleanup hook — call from session_shutdown to deregister this project. */
 export function unregisterPiDreamerProject(opts: {
 	projectIdentity: string;

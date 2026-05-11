@@ -11,8 +11,8 @@
 		"forceConsistentCasingInFileNames": true,
 		"resolveJsonModule": true,
 		"isolatedModules": true,
-		"lib": ["ES2022"],
-		"types": ["node"],
+		"lib": ["ES2024"],
+		"types": ["node", "bun-types"],
 		"baseUrl": ".",
 		"paths": {
 			"@magic-context/core/*": ["../plugin/src/*"]

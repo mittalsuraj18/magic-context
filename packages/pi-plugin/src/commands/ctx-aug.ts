@@ -41,7 +41,7 @@ import {
 	stripThinkingBlocks,
 } from "@magic-context/core/features/magic-context/sidekick/core";
 import { log, sessionLog } from "@magic-context/core/shared/logger";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { PiSubagentRunner } from "../subagent-runner";
 
 /**
@@ -135,7 +135,6 @@ export function registerCtxAugCommand(
 				model: config.model,
 				timeoutMs: config.timeoutMs ?? 30_000,
 				cwd: ctx.cwd,
-				signal: ctx.signal,
 				thinkingLevel: config.thinking_level,
 			});
 

@@ -83,7 +83,7 @@ const DREAMER_ACTION_AGENTS: ReadonlySet<string> = new Set([
  * concatenated text content and return it as the run result.
  *
  * Why subprocess instead of in-process?
- * - Pi's @mariozechner/pi-coding-agent has no in-process child-session
+ * - Pi's @oh-my-pi/pi-coding-agent has no in-process child-session
  *   API equivalent to OpenCode's `client.session.create() / .prompt()`.
  *   Sessions are tied to a SessionManager that runs the interactive UI
  *   loop, and the agent loop expects to own stdout/stderr.
@@ -132,7 +132,7 @@ const DREAMER_ACTION_AGENTS: ReadonlySet<string> = new Set([
 export class PiSubagentRunner implements SubagentRunner {
 	readonly harness = "pi";
 
-	/** Path to the `pi` binary. Defaults to whatever's on $PATH. */
+	/** Path to the `omp` binary. Defaults to whatever's on $PATH. */
 	private readonly piBinary: string;
 	private readonly spawnImpl: typeof childProcess.spawn;
 
@@ -143,7 +143,7 @@ export class PiSubagentRunner implements SubagentRunner {
 			spawnImpl?: typeof childProcess.spawn;
 		} = {},
 	) {
-		this.piBinary = options.piBinary ?? "pi";
+		this.piBinary = options.piBinary ?? "omp";
 		this.spawnImpl = options.spawnImpl ?? childProcess.spawn;
 	}
 
@@ -184,7 +184,7 @@ export class PiSubagentRunner implements SubagentRunner {
 			try {
 				child = this.spawnImpl(this.piBinary, args, {
 					cwd: options.cwd,
-					// Inherit env so OAuth tokens (~/.pi/agent/auth.json),
+					// Inherit env so OAuth tokens (~/.omp/agent/agent.db),
 					// API key env vars, and PATH all flow through. The Pi
 					// CLI reads its own auth state from disk on startup.
 					env: process.env,
@@ -583,7 +583,7 @@ export class PiSubagentRunner implements SubagentRunner {
 }
 
 /**
- * Build the argv for one `pi --print --mode json` invocation.
+ * Build the argv for one `omp --print --mode json` invocation.
  *
  * Argument ordering matters: print mode treats positional args as
  * messages, so the user prompt must come last.
@@ -594,7 +594,7 @@ export function buildArgs(options: SubagentRunOptions): string[] {
 		"--mode",
 		"json",
 		// `--no-session` makes Pi use SessionManager.inMemory() — no
-		// JSONL is written to ~/.pi/agent/sessions/<cwd>/, so historian /
+		// JSONL is written to ~/.omp/agent/sessions/<cwd>/, so historian /
 		// sidekick / dreamer / recomp / compressor child sessions never
 		// show up in `pi resume` or the session picker. We don't need
 		// the persisted JSONL anyway: the result comes back through the

@@ -22,8 +22,8 @@ import {
 } from "@magic-context/core/features/magic-context/search";
 import type { ContextDatabase } from "@magic-context/core/features/magic-context/storage";
 import { getVisibleMemoryIds } from "@magic-context/core/hooks/magic-context/inject-compartments";
-import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
-import { type Static, Type } from "typebox";
+import type { ToolDefinition } from "@oh-my-pi/pi-coding-agent";
+import { type Static, Type } from "@sinclair/typebox";
 
 const DEFAULT_LIMIT = 10;
 

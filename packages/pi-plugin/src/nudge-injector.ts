@@ -1,5 +1,5 @@
 import type { ContextNudge } from "@magic-context/core/hooks/magic-context/nudger";
-import type { ContextEvent } from "@mariozechner/pi-coding-agent";
+import type { ContextEvent } from "@oh-my-pi/pi-coding-agent";
 
 type AgentMessage = ContextEvent["messages"][number];
 type PiAssistantMessage = Extract<AgentMessage, { role: "assistant" }>;
