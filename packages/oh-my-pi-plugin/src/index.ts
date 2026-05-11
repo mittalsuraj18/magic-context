@@ -575,10 +575,21 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	});
 	info("registered /ctx-recomp");
 
+	// Resolve dreamer config early so both the timer registration and the
+	// /ctx-dream command handler can use it (the latter needs it for lazy
+	// on-demand registration when the user changes directories).
+	const dreamerConfig = resolveDreamerFromConfig(config);
+
 	registerCtxDreamCommand(pi, {
 		db,
 		projectDir,
 		projectIdentity,
+		// Pass config for lazy on-demand dreamer registration when the
+		// user changes directories after plugin load. Without this, /ctx-dream
+		// in a different directory fails with "dreamer not registered".
+		dreamerConfig: dreamerConfig ?? undefined,
+		embeddingConfig: config.embedding,
+		memoryEnabled: config.memory.enabled,
 	});
 	info("registered /ctx-dream");
 
@@ -586,7 +597,6 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	// disabled in config (default) this is a no-op. When enabled, the timer
 	// schedules dream runs based on config.dreamer.schedule and uses
 	// PiSubagentRunner to spawn child sessions for each task.
-	const dreamerConfig = resolveDreamerFromConfig(config);
 	if (dreamerConfig) {
 		registerPiDreamerProject({
 			db,

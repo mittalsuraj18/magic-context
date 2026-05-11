@@ -77,16 +77,14 @@ let sessionCounter = 0;
 let piSubagentRunnerFactory: PiSubagentRunnerFactory = () =>
 	new PiSubagentRunner();
 
-/** Initialize the Pi-side dreamer integration: register this project with
- *  the singleton timer, ensure PiSubagentRunner is the active runner. */
-export function registerPiDreamerProject(opts: PiDreamerOptions): void {
+function doRegisterPiDreamerProject(opts: PiDreamerOptions): ProjectRegistration | null {
 	if (!opts.config.enabled) {
-		return;
+		return null;
 	}
 
 	const existing = registeredProjects.get(opts.projectIdentity);
 	if (existing) {
-		return;
+		return existing;
 	}
 
 	registerDreamProjectDirectory(opts.projectIdentity, opts.projectDir);
@@ -121,7 +119,7 @@ export function registerPiDreamerProject(opts: PiDreamerOptions): void {
 	});
 
 	if (!cleanup) {
-		return;
+		return null;
 	}
 
 	// Pi parity for OpenCode `command-handler.ts:236-246` (`/ctx-dream`):
@@ -152,15 +150,27 @@ export function registerPiDreamerProject(opts: PiDreamerOptions): void {
 			projectIdentity: opts.projectIdentity,
 		});
 
-	registeredProjects.set(opts.projectIdentity, { cleanup, runOnce });
+	const registration: ProjectRegistration = { cleanup, runOnce };
+	registeredProjects.set(opts.projectIdentity, registration);
+	return registration;
+}
+
+/** Initialize the Pi-side dreamer integration: register this project with
+ *  the singleton timer, ensure PiSubagentRunner is the active runner. */
+export function registerPiDreamerProject(opts: PiDreamerOptions): void {
+	doRegisterPiDreamerProject(opts);
 }
 
 /**
  * Run one dream cycle IMMEDIATELY for the given project, mirroring
  * OpenCode's `/ctx-dream` behavior. Returns the run result, or `null`
  * if there's nothing to dequeue (queue empty or another worker holds
- * the lease — see `processDreamQueue` semantics). Throws if the project
- * isn't registered (call `registerPiDreamerProject` first).
+ * the lease — see `processDreamQueue` semantics).
+ *
+ * Supports lazy registration: if the project isn't registered yet,
+ * `fallbackOpts` is used to register it on-demand. This fixes the
+ * issue where the user changes directories after plugin load, causing
+ * the dreamer to only be registered for the initial cwd.
  *
  * The user-visible reason this exists: without it, the user types
  * `/ctx-dream` and gets "queued, the timer will run it eventually" —
@@ -170,11 +180,16 @@ export function registerPiDreamerProject(opts: PiDreamerOptions): void {
  */
 export async function runPiDreamForProject(
 	projectIdentity: string,
+	fallbackOpts?: PiDreamerOptions,
 ): Promise<DreamRunResult | null> {
-	const registration = registeredProjects.get(projectIdentity);
+	let registration = registeredProjects.get(projectIdentity);
+	if (!registration && fallbackOpts) {
+		registration = doRegisterPiDreamerProject(fallbackOpts);
+	}
 	if (!registration) {
 		throw new Error(
-			`Pi dreamer not registered for project ${projectIdentity}; call registerPiDreamerProject() first`,
+			`Pi dreamer not registered for project ${projectIdentity}. ` +
+				"Enable dreamer in magic-context.jsonc (dreamer.enabled: true) and restart.",
 		);
 	}
 	return registration.runOnce();
