@@ -41,10 +41,18 @@ function normalizeLimit(limit?: number): number {
     return Math.max(1, Math.floor(limit));
 }
 
+// Audit Finding #7 hardening: when a caller omits `allowedActions`, fall back
+// to the least-privileged set instead of the dreamer's full action list. The
+// only production caller (`tool-registry.ts`) passes `["write", "delete"]`
+// explicitly, and dreamer child sessions are gated by the runtime
+// `toolContext.agent === DREAMER_AGENT` check below — they bypass
+// `allowedActions` entirely. A future caller that forgets the field would
+// previously have inadvertently let primary agents run `list/update/merge/
+// archive`; fail-closed default prevents that class of regression.
 function getAllowedActions(deps: CtxMemoryToolDeps): [CtxMemoryAction, ...CtxMemoryAction[]] {
     const allowed = deps.allowedActions?.length
         ? deps.allowedActions
-        : [...CTX_MEMORY_DREAMER_ACTIONS];
+        : (["write", "delete"] as const);
     return [...allowed] as [CtxMemoryAction, ...CtxMemoryAction[]];
 }
 
@@ -182,7 +190,13 @@ function createCtxMemoryTool(deps: CtxMemoryToolDeps): ToolDefinition {
     return tool({
         description: CTX_MEMORY_DESCRIPTION,
         args: {
-            action: tool.schema.enum(allowedActions).describe("Action to perform on memories"),
+            // The OpenCode plugin exposes one shared tool definition for all agents, so
+            // schema-level narrowing to `allowedActions` blocks dreamer child sessions
+            // before execute() can inspect `toolContext.agent`. Keep the full action
+            // schema visible to the runtime and enforce primary-session safety below.
+            action: tool.schema
+                .enum([...CTX_MEMORY_DREAMER_ACTIONS])
+                .describe("Action to perform on memories"),
             content: tool.schema
                 .string()
                 .optional()

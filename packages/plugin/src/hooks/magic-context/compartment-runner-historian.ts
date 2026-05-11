@@ -48,6 +48,13 @@ export async function runValidatedHistorianPass(args: {
     dumpLabelBase: string;
     timeoutMs?: number;
     fallbackModelId?: string;
+    /**
+     * Resolved historian fallback chain ("provider/modelID" entries). When the
+     * primary historian model fails (auth, model-not-found, transient network),
+     * each fallback is tried in order. Independent of `fallbackModelId` (which
+     * is a last-ditch single-model retry against the active session model).
+     */
+    fallbackModels?: readonly string[];
     callbacks?: HistorianProgressCallbacks;
     /** When true, run a second editor pass after successful historian output
      *  to clean low-signal U: lines and cross-compartment duplicates. If editor
@@ -142,6 +149,15 @@ export async function runValidatedHistorianPass(args: {
  * editor's validated result if successful; falls back to the draft on any
  * failure (editor call, validation, or invalid structure). Editor can never
  * regress behavior — worst case we return the same validated draft.
+ *
+ * Fallback-chain policy (Audit Finding #10 clarification): the editor pass
+ * deliberately does NOT receive `fallbackModels`. If the configured editor
+ * model fails (auth, model-not-found, transient network, or the editor's own
+ * output fails validation), the function returns the already-validated draft
+ * unchanged. Iterating through fallback models here would cost extra LLM
+ * calls per chunk for no compression benefit — the draft is already known to
+ * be valid and the editor pass is purely a polish step. Letting the editor
+ * silently no-op back to the draft is the cheaper and safer behavior.
  */
 async function runEditorPassOrFallback(args: {
     client: PluginContext["client"];
@@ -212,6 +228,8 @@ async function runHistorianPrompt(args: {
     /** Agent identifier to route the request to. Defaults to HISTORIAN_AGENT.
      *  Use HISTORIAN_EDITOR_AGENT for the second pass in two-pass mode. */
     agentId?: string;
+    /** Resolved historian fallback chain (forwarded to the prompt helper). */
+    fallbackModels?: readonly string[];
 }): Promise<HistorianRunResult> {
     const {
         client,
@@ -222,6 +240,7 @@ async function runHistorianPrompt(args: {
         dumpLabel,
         modelOverride,
         agentId = HISTORIAN_AGENT,
+        fallbackModels,
     } = args;
     let agentSessionId: string | null = null;
 
@@ -272,7 +291,14 @@ async function runHistorianPrompt(args: {
                             parts: [{ type: "text", text: prompt, synthetic: true }],
                         },
                     },
-                    { timeoutMs: timeoutMs ?? DEFAULT_HISTORIAN_TIMEOUT_MS },
+                    {
+                        timeoutMs: timeoutMs ?? DEFAULT_HISTORIAN_TIMEOUT_MS,
+                        // When modelOverride is set we're already in the last-ditch retry
+                        // path; iterating fallbacks again would be redundant.
+                        fallbackModels: modelOverride ? undefined : fallbackModels,
+                        callContext:
+                            agentId === HISTORIAN_EDITOR_AGENT ? "historian:editor" : "historian",
+                    },
                 );
                 shared.sessionLog(
                     parentSessionId,
