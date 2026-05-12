@@ -35,7 +35,7 @@ function getReadOnlySessionDb(): Database {
     }
 
     closeCachedReadOnlyDb();
-    const db = new Database(dbPath, { readonly: true });
+    const db = new Database(dbPath);
     cachedReadOnlyDb = { path: dbPath, db };
     return db;
 }
