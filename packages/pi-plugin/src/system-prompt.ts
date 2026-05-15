@@ -25,7 +25,7 @@
  *
  * # Cache stability
  *
- * Pi sessions hit ANY LLM provider, and every major provider has
+ * OMP sessions hit ANY LLM provider, and every major provider has
  * prompt/prefix cache (Anthropic prompt cache, OpenAI/Codex automatic
  * prefix cache, etc.). The system prompt is the front of the cached
  * prefix, so even small drift between turns busts the entire cache and
@@ -56,7 +56,7 @@
  *      `system-prompt-hash.ts:399-411` in the OpenCode plugin.
  *
  * Cross-harness memory sharing: a memory written from OpenCode in this
- * project shows up in Pi context — through both message[0]
+ * project shows up in OMP context — through both message[0]
  * `<session-history>` and the `<user-profile>` block when its
  * underlying user memories table updates.
  */
@@ -450,7 +450,7 @@ export function processSystemPromptForCache(args: {
 
 /**
  * Clear all per-session caches the system-prompt path maintains. Called
- * from Pi `session_shutdown` so caches don't accumulate over plugin
+ * from OMP `session_shutdown` so caches don't accumulate over plugin
  * lifetime for ended sessions.
  */
 export function clearPiSystemPromptSession(sessionId: string): void {

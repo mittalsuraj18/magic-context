@@ -3,7 +3,7 @@
  * OpenCode's `clearOldReasoning`, `replayClearedReasoning`, and
  * `replayStrippedInlineThinking`.
  *
- * Why this matters for Pi:
+ * Why this matters for OMP:
  *   - Pi assistants carry `(PiTextContent | PiThinkingContent | PiToolCall)[]`
  *     in their `content` arrays.
  *   - Older assistant turns' thinking content stays visible to the
@@ -245,7 +245,7 @@ export function replayStrippedInlineThinkingPi(args: {
 }
 
 /**
- * Helper: replicate the stable id Pi's transcript-pi.ts builds for a
+ * Helper: replicate the stable id OMP's transcript-pi.ts builds for a
  * Pi message. We can't import the transcript adapter's private
  * `extractStableId` helper here, so we replicate its rule:
  *   `pi-msg-<index>-<timestamp>-<role>` (or `pi-msg-<index>-<role>`

@@ -16,7 +16,7 @@
  *
  * Allowlist gating mirrors OpenCode's `allowedActions` deps field. In OpenCode,
  * the dreamer subagent gets the full action surface because `toolContext.agent
- * === DREAMER_AGENT`. Pi has no agent identity inside child processes, so we
+ * === DREAMER_AGENT`. OMP has no agent identity inside child processes, so we
  * use an explicit flag (`--magic-context-dreamer-actions`) wired through the
  * subagent extension entry. Same effective behavior, different transport.
  *

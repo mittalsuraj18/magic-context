@@ -45,7 +45,7 @@ const SUBAGENT_ENTRY_PATH = resolveSubagentEntryPath();
 
 /**
  * Grace period (ms) after we detect the terminal assistant message_end
- * before we SIGTERM the Pi child. Pi's print mode often finishes the agent
+ * before we SIGTERM the Pi child. OMP's print mode often finishes the agent
  * loop and emits agent_end / a clean stopReason but doesn't actually exit
  * the process for many seconds (sometimes never on its own). Without this
  * drain, every successful run would wait the full configured timeoutMs.
@@ -77,18 +77,18 @@ const DREAMER_ACTION_AGENTS: ReadonlySet<string> = new Set([
 /**
  * Pi-side implementation of `SubagentRunner`.
  *
- * Spawns `pi --print --mode json` as a child process and consumes its
+ * Spawns `omp --print --mode json` as a child process and consumes its
  * NDJSON event stream over stdout until the `agent_end` event delivers
  * the full final message array. We extract the last assistant message's
  * concatenated text content and return it as the run result.
  *
  * Why subprocess instead of in-process?
- * - Pi's @oh-my-pi/pi-coding-agent has no in-process child-session
+ * - OMP's @oh-my-pi/pi-coding-agent has no in-process child-session
  *   API equivalent to OpenCode's `client.session.create() / .prompt()`.
  *   Sessions are tied to a SessionManager that runs the interactive UI
  *   loop, and the agent loop expects to own stdout/stderr.
  * - The print-mode subprocess path is the *only* officially supported
- *   single-shot invocation in Pi today, and it's stable: it emits a
+ *   single-shot invocation in OMP today, and it's stable: it emits a
  *   well-typed NDJSON event stream regardless of which provider/model
  *   is targeted. Spawning is more expensive (cold-start ~500ms) but
  *   subagent invocations already amortize that against many seconds of
@@ -121,9 +121,9 @@ const DREAMER_ACTION_AGENTS: ReadonlySet<string> = new Set([
  * What we deliberately don't expose:
  * - Tool call streaming. Subagents in Magic Context are configured with
  *   their own narrowed tool sets; if a model emits tool calls during a
- *   subagent run, those tools execute inside Pi's child process just
+ *   subagent run, those tools execute inside OMP's child process just
  *   fine — we just don't surface intermediate state to the caller.
- * - Per-turn token usage. Pi reports usage in each `message_end`, but
+ * - Per-turn token usage. OMP reports usage in each `message_end`, but
  *   the runner contract only returns the final assistant text. If the
  *   sidekick/historian/dreamer ever needs token accounting, we'll add
  *   a `usage` field to `SubagentRunResult.meta` rather than changing
@@ -153,7 +153,7 @@ export class PiSubagentRunner implements SubagentRunner {
 
 		// The model spec is `provider/model` — Pi accepts that directly via
 		// `--model provider/id` (no separate `--provider` flag needed). When a
-		// fallback chain is configured, `buildArgs` emits Pi's `--models a,b,c`.
+		// fallback chain is configured, `buildArgs` emits OMP's `--models a,b,c`.
 
 		return new Promise<SubagentRunResult>((resolve) => {
 			// Track whether we've already resolved so timeout/abort/exit don't
@@ -268,14 +268,14 @@ export class PiSubagentRunner implements SubagentRunner {
 			let lastEventType: string | null = null;
 			let lastEventTimestamp = 0;
 
-			// Accumulate every assistant message we see. Pi's print mode in
+			// Accumulate every assistant message we see. OMP's print mode in
 			// JSON output emits `message_end` events for both intermediate
 			// (tool-call) and terminal turns, with the final assistant
 			// message carrying stopReason="stop" and no toolCall content.
 			//
 			// Why we accumulate instead of waiting for `agent_end`:
-			// Pi's print mode does NOT emit an `agent_end` event on stdout.
-			// That event exists in Pi's internal extension event channel
+			// OMP's print mode does NOT emit an `agent_end` event on stdout.
+			// That event exists in OMP's internal extension event channel
 			// only — the stdout JSON stream comes from `session.subscribe`,
 			// which receives only `message_start`/`message_end`/
 			// `tool_execution_*`/`compaction_*`/`session_info_changed`/
@@ -353,7 +353,7 @@ export class PiSubagentRunner implements SubagentRunner {
 
 				// Live path: accumulate every assistant/tool message Pi
 				// emits via session.subscribe. The terminal assistant turn
-				// is detected by Pi's stopReason vocabulary
+				// is detected by OMP's stopReason vocabulary
 				// ("stop" | "length" | "toolUse" | "error" | "aborted")
 				// being a non-toolUse value AND no toolCall content in the
 				// assistant message body. "length" means the model hit its
@@ -403,7 +403,7 @@ export class PiSubagentRunner implements SubagentRunner {
 					accumulatedMessages.push(e.message);
 				}
 
-				// Pi's print mode finishes the agent loop but does NOT always
+				// OMP's print mode finishes the agent loop but does NOT always
 				// exit the child process cleanly afterwards — observed
 				// pattern: assistant message_end with stopReason="stop"
 				// arrives at ~30s, then the child sits idle until killed.
@@ -617,7 +617,7 @@ export function buildArgs(options: SubagentRunOptions): string[] {
 		"--no-skills",
 		"--no-prompt-templates",
 		// --no-tools is intentionally NOT set: historian and dreamer use
-		// Pi's built-in tools (Edit, Write, etc.) for some maintenance
+		// OMP's built-in tools (Edit, Write, etc.) for some maintenance
 		// tasks. Sidekick uses ctx_search via the lean subagent extension
 		// loaded with `-x` below.
 	];
@@ -653,7 +653,7 @@ export function buildArgs(options: SubagentRunOptions): string[] {
 	if (options.systemPrompt && options.systemPrompt.length > 0) {
 		// We intentionally use --system-prompt (replace) rather than
 		// --append-system-prompt (chain) because subagents are one-shot
-		// and have their own focused system prompt. Mixing in Pi's
+		// and have their own focused system prompt. Mixing in OMP's
 		// default coding-assistant prompt would dilute the historian
 		// / dreamer / sidekick role guidance.
 		args.push("--system-prompt", options.systemPrompt);
@@ -671,7 +671,7 @@ export function buildArgs(options: SubagentRunOptions): string[] {
 	}
 
 	// Pass --thinking <level> only when explicitly configured.
-	// Without an explicit level, Pi's own resolution runs (works for most
+	// Without an explicit level, OMP's own resolution runs (works for most
 	// providers; may fail for e.g. github-copilot/gpt-5.4 which injects
 	// "minimal" as a default that its own API then rejects). Users who hit
 	// this must set `historian.thinking_level` in their Pi magic-context.jsonc.
@@ -689,7 +689,7 @@ export function buildArgs(options: SubagentRunOptions): string[] {
  * Extract the final assistant message's text + status from a Pi `agent_end`
  * messages array.
  *
- * Pi's AgentMessage shape (from @oh-my-pi/pi-ai):
+ * OMP's AgentMessage shape (from @oh-my-pi/pi-ai):
  *   {
  *     role: "user" | "assistant" | "toolResult",
  *     content: Array<{ type: "text" | "toolCall" | "toolResult", ... }>,

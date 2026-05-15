@@ -17,7 +17,7 @@
  * non-empty hint is replayed through the same idempotent append guard. The
  * cache is intentionally process-local and lasts until either a different
  * latest user message id is seen or `clearAutoSearchForPiSession()` is
- * called from Pi session cleanup.
+ * called from OMP session cleanup.
  *
  * ## Timeout
  *
@@ -30,8 +30,8 @@
  *
  * The function returns an `AgentMessage[]`, but mutates only the targeted
  * latest user message in place. That keeps the standalone API easy for the
- * future integrator: callers can pass Pi's mutable event array and return
- * the same reference. We preserve Pi's existing user-content shape instead
+ * future integrator: callers can pass OMP's mutable event array and return
+ * the same reference. We preserve OMP's existing user-content shape instead
  * of normalizing everything to arrays: string content gets a direct string
  * append; array content appends to the first text block or pushes a new
  * `TextContent` block if the user message is image-only. This avoids
@@ -60,9 +60,9 @@ import type { Database } from "@magic-context/core/shared/sqlite";
 import type { ContextEvent } from "@oh-my-pi/pi-coding-agent";
 
 /**
- * Pi's full AgentMessage union, sourced from the live SDK ContextEvent
+ * OMP's full AgentMessage union, sourced from the live SDK ContextEvent
  * payload. Using the SDK's type (instead of a re-declared structural alias)
- * keeps this module type-compatible with the rest of the Pi plugin without
+ * keeps this module type-compatible with the rest of the OMP plugin without
  * a per-version maintenance burden — when pi-coding-agent's types shift,
  * we get build errors here at the import site instead of silent runtime
  * mismatches.
@@ -71,7 +71,7 @@ export type AgentMessage = ContextEvent["messages"][number];
 
 /**
  * Extract just the `user` variant of AgentMessage so internal helpers
- * can mutate `content` without re-narrowing on every call. Pi's user
+ * can mutate `content` without re-narrowing on every call. OMP's user
  * message carries `string | (TextContent|ImageContent)[]` for content.
  */
 type UserMessage = Extract<AgentMessage, { role: "user" }>;
@@ -90,7 +90,7 @@ export interface PiAutoSearchOptions {
 type AutoSearchTurnCache = { messageId: string; hint: string };
 
 /**
- * Most recent auto-search decision per Pi session. `hint === ""` is a
+ * Most recent auto-search decision per OMP session. `hint === ""` is a
  * deliberate sentinel for “already computed and no hint for this turn”,
  * preventing duplicate FTS/vector work on repeated context events.
  */
@@ -352,7 +352,7 @@ export async function runAutoSearchHintForPi(args: {
 }
 
 /**
- * Session cleanup hook. Call from Pi's session shutdown/delete lifecycle to
+ * Session cleanup hook. Call from OMP's session shutdown/delete lifecycle to
  * release the per-turn cache entry for that session.
  */
 export function clearAutoSearchForPiSession(sessionId: string): void {

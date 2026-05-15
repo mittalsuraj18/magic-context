@@ -57,7 +57,7 @@
  *      a sentinel that's also a `TextContent` — the unions don't allow
  *      heterogeneous in-place index assignment cleanly.
  *
- *   2. Pi's event API contract is "return a new array". Even if we
+ *   2. OMP's event API contract is "return a new array". Even if we
  *      mutate in place, returning the original array is allowed but
  *      doesn't give callers any guarantee about which messages
  *      changed. By tracking dirty messages explicitly we can, in the
@@ -585,7 +585,7 @@ function createPiAssistantPart(
 			return false;
 		},
 		setToolOutput(): boolean {
-			// Assistant messages don't have tool outputs in Pi — those
+			// Assistant messages don't have tool outputs in OMP — those
 			// live in separate ToolResultMessage entries (handled by
 			// createPiToolResultPart). Calling this on an assistant
 			// part is always a programming error.
@@ -738,7 +738,7 @@ function classifyAssistantContent(part: unknown): TranscriptPartKind {
  * This is stable WITHIN a transform pass (the source array doesn't
  * change between adapter creation and commit) but NOT across passes if
  * messages get prepended/inserted. Cross-pass tracking should rely on
- * Pi's session-entry IDs from `ctx.sessionManager.getBranch()`, NOT on
+ * OMP's session-entry IDs from `ctx.sessionManager.getBranch()`, NOT on
  * these synthetic IDs. Step 4b.3 wires the session-entry layer.
  */
 function extractStableId(

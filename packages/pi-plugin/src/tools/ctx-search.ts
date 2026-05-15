@@ -5,7 +5,7 @@
  * over the shared SQLite store. The pi-plugin only needs to:
  *
  *   1. Translate the LLM-provided arguments into the search options shape.
- *   2. Resolve session ID and project identity from the Pi extension context.
+ *   2. Resolve session ID and project identity from the OMP extension context.
  *   3. Format results for the LLM the same way the OpenCode plugin does.
  *
  * `ctx_expand` is now registered alongside (see `./ctx-expand.ts`) — Pi

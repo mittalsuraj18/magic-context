@@ -220,7 +220,7 @@ function injectIntoLatestAssistant(
 
 /**
  * Pi synthetic-todowrite injection entry point. Mirrors the B7 block in
- * OpenCode's `transform-postprocess-phase.ts` but uses Pi's wire-shape
+ * OpenCode's `transform-postprocess-phase.ts` but uses OMP's wire-shape
  * helpers.
  *
  * Returns the (possibly-mutated) messages array. The array itself is

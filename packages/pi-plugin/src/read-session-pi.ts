@@ -10,7 +10,7 @@
  *
  * # Shape mapping
  *
- * Pi's session branch is a `SessionEntry[]` from
+ * OMP's session branch is a `SessionEntry[]` from
  * `@oh-my-pi/pi-coding-agent` core/session-manager.d.ts:
  *
  *   SessionMessageEntry { id, parentId, type: "message", timestamp,
@@ -41,7 +41,7 @@
  *
  * Ordinals are assigned by walking the branch in order and counting
  * monotonically from 1. The mapping is stable for the duration of a
- * Pi session because `getBranch()` returns the linear sequence from
+ * OMP session because `getBranch()` returns the linear sequence from
  * root to leaf — entries are append-only on the active branch.
  *
  * # Entry types we skip
@@ -53,18 +53,18 @@
  * needs to summarize. Future steps may surface compaction/branch
  * summary entries differently if needed.
  *
- * # Why not use Pi's compaction directly?
+ * # Why not use OMP's compaction directly?
  *
- * Pi has its own compaction primitive (CompactionEntry +
+ * OMP has its own compaction primitive (CompactionEntry +
  * `pi.compact()`). Magic Context replaces it with historian-driven
  * compartments because:
  *   1. Compartments preserve a structured XML view of older turns
- *      (categorized facts, ranges, dates) that Pi's monolithic
+ *      (categorized facts, ranges, dates) that OMP's monolithic
  *      summary text can't.
  *   2. Cross-harness consistency: OpenCode users see the same
  *      `<session-history>` shape regardless of which harness ran the
  *      historian.
- *   3. Pi's compaction lives in the session JSONL file; magic-context
+ *   3. OMP's compaction lives in the session JSONL file; magic-context
  *      compartments live in the shared cortexkit DB scoped by
  *      sessionId. Different storage, different lifecycle.
  */
@@ -126,7 +126,7 @@ function getToolCallIds(content: unknown): Set<string> {
 }
 
 /**
- * Read the active Pi session branch and synthesize an OpenCode-shape
+ * Read the active OMP session branch and synthesize an OpenCode-shape
  * RawMessage[]. Returns an empty array if no branch is available.
  *
  * The function is pure given `getBranch()` is pure (which it is — Pi

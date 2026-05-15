@@ -17,10 +17,10 @@
  * directly into the session jsonl, and the Pi UI renders from that
  * stored text. So while OpenCode hides the prefix from its own UI via
  * `experimental.text.complete` (which mutates `output.text` before
- * persistence), Pi's UI shows the raw mimicked prefix to the user
+ * persistence), OMP's UI shows the raw mimicked prefix to the user
  * because nothing scrubs it on the way to disk.
  *
- * This module mirrors OpenCode's `text-complete.ts` for Pi by hooking
+ * This module mirrors OpenCode's `text-complete.ts` for OMP by hooking
  * `pi.on("message_end", ...)`. The event fires synchronously before
  * `agent-session.ts:appendMessage()` persists the message — the event
  * runner emits to extensions FIRST, then persists by reference, so
@@ -48,7 +48,7 @@
  * in the displayed tool result so they can reference it later.
  *
  * Actually wait — tool results are the output of `tool_result`
- * messages from the user role in Pi's model. If the tagger added a
+ * messages from the user role in OMP's model. If the tagger added a
  * §N§ prefix to those, they'd persist with the prefix. But the
  * tagger only injects prefixes when `skipPrefixInjection: false`
  * (i.e. `ctx_reduce_enabled: true`). For users with reduction

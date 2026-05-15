@@ -15,7 +15,7 @@
  */
 
 // We accept a broad `unknown[]` and inspect each entry defensively.
-// Pi's `event.messages` from the `pi.on("context", ...)` hook is the
+// OMP's `event.messages` from the `pi.on("context", ...)` hook is the
 // canonical input. Avoiding a hard dependency on the internal
 // AgentMessage type keeps this helper resilient to Pi-side type
 // renames and makes it harness-agnostic.

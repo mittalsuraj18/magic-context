@@ -126,7 +126,7 @@ export function registerPiDreamerProject(opts: PiDreamerOptions): void {
 
 	// Pi parity for OpenCode `command-handler.ts:236-246` (`/ctx-dream`):
 	// after enqueueing, OpenCode immediately drains the queue via
-	// `processDreamQueue`. Pi previously relied on the 15-min timer tick,
+	// `processDreamQueue`. OMP previously relied on the 15-min timer tick,
 	// which made `/ctx-dream` feel broken (the user typed it but nothing
 	// observable happened). Capture the same per-project args so a single
 	// callback can run one cycle on demand.

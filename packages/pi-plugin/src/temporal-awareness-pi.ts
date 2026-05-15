@@ -45,7 +45,7 @@ type PiAgentMessage = PiUserMessage | PiOtherMessage;
  * Inject HTML-comment gap markers into Pi user messages. Mirrors
  * OpenCode's `injectTemporalMarkers` 1:1 in agent-visible behavior;
  * differences are limited to the message-shape walking and write
- * back into Pi's content union.
+ * back into OMP's content union.
  *
  * Returns the number of user messages that received a new marker.
  */

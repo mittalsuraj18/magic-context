@@ -61,13 +61,13 @@ export function registerCtxStatusCommand(
 	deps: RegisterCtxStatusDeps,
 ): void {
 	pi.registerCommand("ctx-status", {
-		description: "Show Magic Context status for the current Pi session",
+		description: "Show Magic Context status for the current OMP session",
 		handler: async (_args, ctx) => {
 			const sessionId = resolveSessionId(ctx);
 			if (!sessionId) {
 				sendCtxStatusMessage(pi, {
 					title: "/ctx-status",
-					text: "## Magic Status\n\nNo active Pi session is available.",
+					text: "## Magic Status\n\nNo active OMP session is available.",
 					level: "error",
 				});
 				return;

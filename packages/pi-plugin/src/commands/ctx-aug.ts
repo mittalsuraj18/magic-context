@@ -13,8 +13,8 @@
  *
  * Implementation differences from OpenCode:
  * - OpenCode uses `client.session.create() + client.session.prompt()` to spawn
- *   sidekick as a child session with `parentID`. Pi has no such API; we
- *   instead spawn `pi --print --mode json` as a subprocess via
+ *   sidekick as a child session with `parentID`. OMP has no such API; we
+ *   instead spawn `omp --print --mode json` as a subprocess via
  *   `PiSubagentRunner` (see ../subagent-runner.ts).
  * - OpenCode commits the augmented prompt via a server-side `client.session
  *   .prompt()` call. Pi has a native `pi.sendUserMessage(content)` helper
@@ -45,7 +45,7 @@ import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { PiSubagentRunner } from "../subagent-runner";
 
 /**
- * Configuration for Pi's sidekick agent.
+ * Configuration for OMP's sidekick agent.
  *
  * Same shape as OpenCode's `SidekickConfig` minus the OpenCode-specific
  * agent-name/fallback wiring — Pi just needs a model identifier and an
@@ -63,10 +63,10 @@ export interface PiSidekickConfig {
 }
 
 /**
- * Register the `/ctx-aug` slash command on Pi.
+ * Register the `/ctx-aug` slash command on OMP.
  *
  * The command is a no-op when `config` is undefined (sidekick disabled in
- * config). Pi's command UI will still show the command but invoking it
+ * config). OMP's command UI will still show the command but invoking it
  * will print a "not configured" message to the user, matching OpenCode's
  * behavior of surfacing the missing configuration via notification rather
  * than hiding the command entirely.
@@ -82,7 +82,7 @@ export function registerCtxAugCommand(
 		handler: async (args, ctx) => {
 			const prompt = args.trim();
 
-			// Use Pi's session entry IDs for log correlation. The session
+			// Use OMP's session entry IDs for log correlation. The session
 			// manager's branch always has at least the current entry.
 			const branch = ctx.sessionManager.getBranch();
 			const lastEntryId =
@@ -123,7 +123,7 @@ export function registerCtxAugCommand(
 			// current project's cwd so its tool calls (notably `ctx_search`)
 			// resolve against the same project identity as the invoking
 			// session. This is what makes cross-harness memory sharing work:
-			// sidekick sees the same memories whether spawned from Pi or
+			// sidekick sees the same memories whether spawned from OMP or
 			// OpenCode at the same cwd.
 			const projectIdentity = resolveProjectIdentity(ctx.cwd);
 			sessionLog(sessionLabel, "/ctx-aug: project identity", projectIdentity);

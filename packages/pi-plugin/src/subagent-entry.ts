@@ -1,7 +1,7 @@
 /**
- * Magic Context — Pi subagent extension entry.
+ * Magic Context — OMP subagent extension entry.
  *
- * This is a lean extension entry loaded ONLY in child Pi processes
+ * This is a lean extension entry loaded ONLY in child OMP processes
  * spawned by `PiSubagentRunner` (sidekick, dreamer, historian, etc.).
  * It registers Magic Context's tool surface for the subagent — nothing
  * else.
@@ -30,11 +30,11 @@
  * tool surface — that's it.
  *
  * How parent passes this entry to the child:
- *   pi --print --no-extensions \
+ *   omp --print --no-extensions \
  *     -x /absolute/path/to/dist/subagent-entry.js \
  *     [other flags...]
  *
- * `--no-extensions` skips Pi's discovered-extensions scan but still
+ * `--no-extensions` skips OMP's discovered-extensions scan but still
  * loads the explicit `-x` paths (verified in pi-coding-agent
  * resource-loader.js:272-274). The result: subagent gets tools without
  * any of the full-extension overhead or recursion risk.
@@ -60,7 +60,7 @@ const SUBAGENT_DREAMER_ACTIONS_FLAG = "magic-context-dreamer-actions";
 let openedDb: ContextDatabase | undefined;
 
 export default function magicContextSubagentExtension(pi: ExtensionAPI): void {
-	// Mark this Pi process as a Magic Context subagent in the shared
+	// Mark this OMP process as a Magic Context subagent in the shared
 	// harness state. session-scoped writes from any code path that
 	// reaches the shared core will tag rows with harness='pi' the same
 	// way the main extension does — but in practice subagents shouldn't

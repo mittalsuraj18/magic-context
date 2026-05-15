@@ -2,7 +2,7 @@
  * Pi-side tool registration.
  *
  * Registers `ctx_search`, `ctx_memory`, `ctx_note`, `ctx_expand`, and
- * conditionally `ctx_reduce` against the live Pi extension API. The
+ * conditionally `ctx_reduce` against the live OMP extension API. The
  * shared guidance block in `system-prompt.ts` advertises these to the
  * LLM only when each is registered, so a registration gap surfaces as
  * "tool not found" errors when the agent tries to follow the guidance.

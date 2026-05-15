@@ -7,7 +7,7 @@
  * behind a summarized region.
  *
  * Implementation: shared `readSessionChunk` reads via the per-session
- * `RawMessageProvider` registry. We register Pi's `readPiSessionMessages`
+ * `RawMessageProvider` registry. We register OMP's `readPiSessionMessages`
  * for the duration of this single tool call (and unregister in `finally`)
  * so we never accidentally leak the provider into other transform passes
  * which might race against this call.
@@ -85,7 +85,7 @@ export function createCtxExpandTool(
 
 			const sessionId = ctx.sessionManager.getSessionId();
 			if (!sessionId) {
-				return err("Error: no active Pi session.");
+				return err("Error: no active OMP session.");
 			}
 
 			// Register the Pi raw-message provider for THIS sessionId

@@ -8,7 +8,7 @@
  * `session_meta.last_todo_state` via the `tool.execute.after` hook so the
  * synthetic-todowrite injector can resurface it across cache-busts.
  *
- * Pi-coding-agent has NO built-in `todowrite` — Pi treats todo management
+ * Pi-coding-agent has NO built-in `todowrite` — OMP treats todo management
  * as an extension concern (see `pi-mono/packages/coding-agent/examples/extensions/todo.ts`
  * for a community example). That means:
  *   1. The Pi LLM won't see a `todowrite` tool unless something registers it.

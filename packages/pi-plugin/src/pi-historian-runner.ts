@@ -2,7 +2,7 @@
  * Pi historian runner — Step 4b.3b.
  *
  * Mirrors `compartment-runner-incremental.ts` (OpenCode) but uses
- * `PiSubagentRunner` (spawns `pi --print --mode json` subprocess) for the
+ * `PiSubagentRunner` (spawns `omp --print --mode json` subprocess) for the
  * actual historian invocation instead of `client.session.create` + prompt.
  *
  * What this runner does:
@@ -120,7 +120,7 @@ export interface PiHistorianDeps {
 	provider: RawMessageProvider;
 	/** Subagent runner (PiSubagentRunner instance) for historian spawn. */
 	runner: SubagentRunner;
-	/** Historian model id (provider/model) — required for PiSubagentRunner. */
+	/** Historian model id (provider/model) — required for OMPSubagentRunner. */
 	historianModel: string;
 	/** Optional ordered fallback chain. */
 	fallbackModels?: readonly string[];
@@ -134,7 +134,7 @@ export interface PiHistorianDeps {
 	 *  to the first-pass result on failure. Default: false. */
 	twoPass?: boolean;
 	/** Pi only: explicit thinking level passed as --thinking <level> to
-	 *  historian subagent invocations. When unset, Pi's own resolution runs
+	 *  historian subagent invocations. When unset, OMP's own resolution runs
 	 *  (works for most providers; may fail for e.g. github-copilot/gpt-5.4). */
 	thinkingLevel?: string;
 	/** Cross-session memory feature gate (`memory.enabled`). */
@@ -283,12 +283,12 @@ export async function runPiHistorian(deps: PiHistorianDeps): Promise<void> {
 			// stall the model on certain provider/API combinations
 			// (notably github-copilot/gpt-5.4 via the openai-responses API,
 			// which buffers the full reasoning trace before emitting any
-			// output). The historian agent has access to Pi's built-in Read
+			// output). The historian agent has access to OMP's built-in Read
 			// tool and the prompt instructs it to read the file before
 			// processing the new chunk. The file lives under
 			// <project>/.opencode/magic-context/historian/ so it stays
 			// inside the project boundary on the OpenCode side and remains a
-			// stable, user-debuggable location for Pi as well. Cleaned up in
+			// stable, user-debuggable location for OMP as well. Cleaned up in
 			// finally{}.
 			stateFilePath = maybeWriteHistorianStateFile(
 				sessionId,
@@ -746,7 +746,7 @@ function appendPiNativeCompaction(args: {
  *
  * Historian publishes compartments whose `endMessage` ordinal comes
  * from `read-session-pi.ts:convertEntriesToRawMessages` — the
- * canonical Pi ordinal source. Pi's `appendCompaction` API expects
+ * canonical Pi ordinal source. OMP's `appendCompaction` API expects
  * `firstKeptEntryId` as a real SessionEntry id.
  *
  * A previous implementation walked `entries` with its own counter
@@ -758,7 +758,7 @@ function appendPiNativeCompaction(args: {
  *
  * When the counters diverged, the function could never count past
  * `(user_count + assistant_count)` ordinals, returned null for any
- * `lastCompactedOrdinal` beyond that point, and Pi's native compaction
+ * `lastCompactedOrdinal` beyond that point, and OMP's native compaction
  * marker was silently never written. The Pi JSONL grew unbounded
  * while magic-context kept publishing compartments to its DB
  * (cortexkit issue #X1, surfaced by pi-deferred-compaction-marker

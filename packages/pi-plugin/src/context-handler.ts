@@ -21,7 +21,7 @@
  *   subprocess spawn live in 4b.3.
  * - Nudges (rolling, note-nudge, ctx_reduce reminders). 4b.4.
  * - Auto-search hint injection. 4b.4.
- * - Sentinel stripping for cache stability. Pi's transform model is
+ * - Sentinel stripping for cache stability. OMP's transform model is
  *   single-pass-per-LLM-call, so OpenCode-style cache-bust avoidance
  *   doesn't apply. If a Pi provider exposes prompt cache later we'd
  *   add the relevant subset.
@@ -29,7 +29,7 @@
  *   compaction-event surface to inject into.
  *
  * Error handling: any thrown error is caught and logged, then the
- * original messages pass through unmodified. Pi's LLM call should
+ * original messages pass through unmodified. OMP's LLM call should
  * never fail because of a transform bug — same fail-open philosophy
  * as the OpenCode `messages-transform` wrapper.
  */
@@ -225,7 +225,7 @@ function readPiSessionMessageById(
 }
 
 /**
- * Mark a Pi session as needing an injection-cache rebuild on its next
+ * Mark a OMP session as needing an injection-cache rebuild on its next
  * transform pass. Cheap idempotent set add — multiple callers can
  * signal in the same window and only the next pass will see the
  * combined effect.
@@ -235,7 +235,7 @@ export function signalPiHistoryRefresh(sessionId: string): void {
 }
 
 /**
- * Mark a Pi session as needing system-prompt adjunct refresh on its
+ * Mark a OMP session as needing system-prompt adjunct refresh on its
  * next `before_agent_start` event. Used by /ctx-flush, dreamer doc
  * publication, and user-memory promotion.
  */
@@ -244,7 +244,7 @@ export function signalPiSystemPromptRefresh(sessionId: string): void {
 }
 
 /**
- * Mark a Pi session as needing pending-op materialization on the next
+ * Mark a OMP session as needing pending-op materialization on the next
  * execute pass. Used by /ctx-flush.
  */
 export function signalPiPendingMaterialization(sessionId: string): void {
@@ -370,7 +370,7 @@ export function consumePendingMaterialization(sessionId: string): boolean {
 }
 
 /**
- * Pi's full AgentMessage union (user | assistant | toolResult | custom).
+ * OMP's full AgentMessage union (user | assistant | toolResult | custom).
  * Sourced from the live ContextEvent payload so the type stays in sync
  * with @oh-my-pi/pi-coding-agent without us re-declaring it.
  *
@@ -405,7 +405,7 @@ export interface PiHistorianOptions {
 	 *  OpenCode's `historian.two_pass` config. */
 	twoPass?: boolean;
 	/** Pi only: explicit thinking level for historian/compressor subagent
-	 *  invocations (passed as --thinking <level>). When unset, Pi's own
+	 *  invocations (passed as --thinking <level>). When unset, OMP's own
 	 *  default resolution applies. See `historian.thinking_level` in config. */
 	thinkingLevel?: string;
 	/** Cross-session memory feature gate (`memory.enabled`). */
@@ -486,7 +486,7 @@ export interface PiHeuristicsOptions {
 	 * Number of tags before the most recent tag whose typed reasoning is
 	 * cleared on cache-busting passes. Mirrors OpenCode's
 	 * `clear_reasoning_age` config (`packages/plugin/src/config/schema/magic-context.ts:303`).
-	 * Default `50` matches OpenCode. Pi previously hardcoded `30`, which
+	 * Default `50` matches OpenCode. OMP previously hardcoded `30`, which
 	 * cleared reasoning more aggressively than the user configured.
 	 */
 	clearReasoningAge?: number;
@@ -574,7 +574,7 @@ export interface PiContextHandlerOptions {
 }
 
 /**
- * Resolve the active Pi session id for the given context. Pi's
+ * Resolve the active OMP session id for the given context. Pi's
  * ReadonlySessionManager exposes `getSessionId()` (the UUID written
  * into the session file's `SessionHeader`); that's stable across the
  * session's lifetime even when branches are navigated, and matches
@@ -589,7 +589,7 @@ export interface PiContextHandlerOptions {
  *
  * Returns undefined when no session is active — context events should
  * never fire in that state, but defending against it keeps the
- * transform fail-open if Pi's lifecycle changes in future versions.
+ * transform fail-open if OMP's lifecycle changes in future versions.
  */
 function resolveSessionId(ctx: ExtensionContext): string | undefined {
 	const sm = ctx.sessionManager;
@@ -609,7 +609,7 @@ function resolveSessionId(ctx: ExtensionContext): string | undefined {
 /**
  * Resolve the SessionEntry id for each AgentMessage in `event.messages`.
  *
- * Pi's runtime builds `event.messages` from `sessionManager.getBranch()`
+ * OMP's runtime builds `event.messages` from `sessionManager.getBranch()`
  * by filtering to message-type entries (`type === "message"`) plus
  * synthetic compaction-summary / branch-summary messages. Magic Context
  * needs the underlying SessionEntry id for compartment boundary lookup
@@ -630,7 +630,7 @@ function resolveSessionId(ctx: ExtensionContext): string | undefined {
  */
 /**
  * Collect SessionEntry ids that align 1:1 with `event.messages` —
- * the same `AgentMessage[]` Pi's `buildSessionContext()` produces.
+ * the same `AgentMessage[]` OMP's `buildSessionContext()` produces.
  *
  * Critical: `getBranch()` returns the entire path from leaf to root,
  * INCLUDING entries that pre-date the latest compaction. Filtering
@@ -689,7 +689,7 @@ function collectMessageEntryIds(
 	if (!Array.isArray(entries)) return undefined;
 
 	// Find the latest compaction entry (walk from end → start; same
-	// algorithm Pi's getLatestCompactionEntry uses).
+	// algorithm OMP's getLatestCompactionEntry uses).
 	let compactionIndex = -1;
 	let firstKeptEntryId: string | undefined;
 	for (let i = entries.length - 1; i >= 0; i--) {
@@ -813,7 +813,7 @@ function collectMessageEntryIds(
  * The Tagger is created once per session boot — same lifecycle as the
  * OpenCode plugin's tagger. It maintains in-memory state (the
  * monotonic counter, assignment map) across `context` events so tag
- * numbers stay stable for the duration of the Pi session.
+ * numbers stay stable for the duration of the OMP session.
  */
 export function registerPiContextHandler(
 	pi: ExtensionAPI,
@@ -898,7 +898,7 @@ export function registerPiContextHandler(
 
 			// Resolve scheduler decision: execute-vs-defer based on TTL
 			// + threshold. Drives whether heuristic cleanup runs on this
-			// pass. Read live context usage from Pi (tokens/percent) and
+			// pass. Read live context usage from OMP (tokens/percent) and
 			// the persisted session-meta record (last_response_time,
 			// cache_ttl).
 			// Prefer the OpenCode-equivalent pressure persisted by
@@ -906,7 +906,7 @@ export function registerPiContextHandler(
 			// is computed from the assistant message's `usage` with the
 			// same formula OpenCode uses (input + cacheRead + cacheWrite,
 			// divided by `effectiveContextLimit` which already factors in
-			// `detected_context_limit`). Pi's built-in `getContextUsage()`
+			// `detected_context_limit`). OMP's built-in `getContextUsage()`
 			// `percent` field includes output tokens, which causes a
 			// small but real drift in tests and a much larger drift after
 			// a provider overflow recovery sets a lower detected limit.
@@ -941,7 +941,7 @@ export function registerPiContextHandler(
 			//      emergency path (await historian + drop-all-tools)
 			//      fires regardless of pressure math.
 			//   2. If the error reported a real context limit, prefer
-			//      that limit over Pi's reported contextWindow (which
+			//      that limit over OMP's reported contextWindow (which
 			//      was clearly wrong if we just overflowed).
 			//
 			// Mirrors OpenCode's transform.ts:401 wiring exactly. The
@@ -993,7 +993,7 @@ export function registerPiContextHandler(
 				schedulerDecision = "defer";
 			}
 
-			// Migrated/imported sessions: a Pi session loaded with a large
+			// Migrated/imported sessions: a OMP session loaded with a large
 			// existing JSONL has no usage data yet (pre-LLM-call) and no
 			// `last_response_time` baseline, so the scheduler returns
 			// "defer" on the brand-new-session branch — but the message
@@ -1168,7 +1168,7 @@ export function registerPiContextHandler(
 				schedulerDecision,
 				// 95% emergency forces drop-all-tools regardless of the
 				// 85% gate, so the LLM call sees the smallest possible
-				// prompt before we hand control back to Pi.
+				// prompt before we hand control back to OMP.
 				forceMaterialization: forceMaterialization || isEmergency,
 				isCacheBusting,
 				reasoningClearing: {
@@ -1277,7 +1277,7 @@ export function registerPiContextHandler(
 			//
 			// Cache-busting gate parity: OpenCode uses
 			// `isCacheBustingPass = shouldApplyPendingOps || shouldRunHeuristics`
-			// (transform-postprocess-phase.ts:273). Pi's `isCacheBusting`
+			// (transform-postprocess-phase.ts:273). OMP's `isCacheBusting`
 			// flag from the outer handler only covers history refresh
 			// (historian publication), so we OR it with `result.heuristicsExecuted`
 			// — the Pi equivalent of "execute pass that actually mutated
@@ -1356,7 +1356,7 @@ export function registerPiContextHandler(
  *
  * We store the actual Promise (not just the session id) so the
  * `session_shutdown` handler can `await` outstanding runs before Pi
- * exits — critical for `pi --print` mode where the parent process
+ * exits — critical for `omp --print` mode where the parent process
  * exits as soon as `agent_end` fires, otherwise killing the historian
  * subprocess mid-run.
  */
@@ -1478,7 +1478,7 @@ function maybeFireCompressor(args: {
 			//     drops sit in pending_ops and context climbs until the
 			//     85% force-materialization threshold — exactly the
 			//     "context kept going up after historian/compressor ran"
-			//     symptom users observed in Pi.
+			//     symptom users observed in OMP.
 			//
 			// We deliberately do NOT signal systemPromptRefresh — historian
 			// /compressor don't change disk-backed adjuncts (docs/profile/
@@ -1586,7 +1586,7 @@ function spawnPiHistorianRun(args: {
 			//     drops sit in pending_ops and context climbs until the
 			//     85% force-materialization threshold — exactly the
 			//     "context kept going up after historian ran" symptom
-			//     users observed at 64% → 69%+ on Pi.
+			//     users observed at 64% → 69%+ on OMP.
 			//
 			// We deliberately do NOT signal systemPromptRefresh — historian
 			// doesn't change disk-backed adjuncts (docs/profile/key-files),
@@ -1662,7 +1662,7 @@ function maybeFireHistorian(args: {
 	}
 
 	// Prefer OpenCode-equivalent pressure persisted by message_end.
-	// Pi's built-in `ctx.getContextUsage()` reports total-tokens
+	// OMP's built-in `ctx.getContextUsage()` reports total-tokens
 	// percent (input + output + cache), but historian/trigger math
 	// expects wire-input pressure (input + cacheRead + cacheWrite).
 	// `session_meta.lastContextPercentage` carries the corrected value
@@ -1720,7 +1720,7 @@ function maybeFireHistorian(args: {
 	}
 
 	// Register the Pi RawMessageProvider for this sessionId so the
-	// shared trigger logic + historian can read Pi session messages
+	// shared trigger logic + historian can read OMP session messages
 	// via the standard `readRawSessionMessages` etc. helpers. The
 	// provider stays registered while the historian runs and
 	// unregisters in finally.
@@ -1802,7 +1802,7 @@ function maybeFireHistorian(args: {
 		// Fire-and-forget for the user's LLM call: the parent agent
 		// turn never awaits this. But we DO track the Promise in
 		// inFlightHistorian so `awaitInFlightHistorians()` can wait
-		// at session_shutdown — without that, `pi --print` mode would
+		// at session_shutdown — without that, `omp --print` mode would
 		// kill the historian subprocess mid-run when the parent exits.
 		spawnPiHistorianRun({
 			ctx,
@@ -2122,13 +2122,13 @@ async function runPipeline(args: RunPipelineArgs): Promise<RunPipelineResult> {
 	//
 	// - stripReasoningFromMergedAssistants: handles a quirk of the
 	//   Vercel AI SDK where two consecutive assistant messages with
-	//   reasoning parts get merged before send. Pi's send path doesn't
+	//   reasoning parts get merged before send. OMP's send path doesn't
 	//   merge messages this way, so the workaround isn't needed.
 	//
 	// - stripProcessedImages: replaces large base64 image payloads in
 	//   user `file` parts with sentinels after the assistant has
-	//   processed them. Pi's image part shape is different (kind:
-	//   "image" with a URL) and large base64 images are rare in Pi
+	//   processed them. OMP's image part shape is different (kind:
+	//   "image" with a URL) and large base64 images are rare in OMP
 	//   sessions — the equivalent path here would only fire for the
 	//   pasted-screenshot case, which we don't currently optimize.
 	//   Can be added later with a Pi-specific image-content stripper.
@@ -2214,7 +2214,7 @@ async function runPipeline(args: RunPipelineArgs): Promise<RunPipelineResult> {
 
 	// 5. Commit tagging mutations back to Pi messages BEFORE injecting
 	// the history block. Otherwise the injection write target is the
-	// pre-tagged content. Pi's transcript adapter writes mutations
+	// pre-tagged content. OMP's transcript adapter writes mutations
 	// back to the underlying AgentMessage[] via the part proxies, so
 	// commit() just locks the result in.
 	transcript.commit();
@@ -2314,7 +2314,7 @@ async function runPipeline(args: RunPipelineArgs): Promise<RunPipelineResult> {
 
 /**
  * Apply the rolling/iteration nudge after tagging. Mirrors OpenCode's
- * `transform-postprocess-phase.ts` (around lines 568-604) — but for Pi
+ * `transform-postprocess-phase.ts` (around lines 568-604) — but for OMP
  * there is no anchored-assistant cache, so we use the simpler
  * insert-before-latest-user strategy from `injectPiNudge`.
  *
@@ -2611,12 +2611,12 @@ function appendReminderToPiUserMessage(
 }
 
 /**
- * Per-session cleanup. Pi has no `session_deleted` event, but it does
+ * Per-session cleanup. OMP has no `session_deleted` event, but it does
  * fire `session_before_switch` when the user switches to a different
- * session within the same Pi process, and `session_shutdown` when the
+ * session within the same OMP process, and `session_shutdown` when the
  * process exits. Both are valid moments to drain caches keyed by the
  * outgoing session id so we don't leak unbounded memory across many
- * session switches in a long-lived Pi process.
+ * session switches in a long-lived OMP process.
  *
  * Counterpart to OpenCode `session.deleted` cleanup in
  * `event-handler.ts:262-276`. We clean every per-session map this

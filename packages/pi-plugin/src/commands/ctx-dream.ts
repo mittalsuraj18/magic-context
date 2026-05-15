@@ -95,7 +95,7 @@ export function registerCtxDreamCommand(
 
 			// OpenCode parity (command-handler.ts:236-246): immediately drain
 			// the dream queue from the same registered client/config the
-			// timer uses. Pi previously left this to the 15-min timer, so
+			// timer uses. OMP previously left this to the 15-min timer, so
 			// /ctx-dream felt broken.
 			try {
 				const runDreamForProject =

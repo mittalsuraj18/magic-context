@@ -1,9 +1,9 @@
 /**
  * Pi pressure computation — OpenCode-equivalent semantics.
  *
- * Pi's built-in `ctx.getContextUsage()` reports a `percent` field
+ * OMP's built-in `ctx.getContextUsage()` reports a `percent` field
  * computed as `(input + output + cacheRead + cacheWrite) / contextWindow`.
- * That includes output tokens, which makes Pi's percentage drift above
+ * That includes output tokens, which makes OMP's percentage drift above
  * the wire-input-only pressure OpenCode tracks. The drift is small but
  * material:
  *
@@ -11,7 +11,7 @@
  *     Pi off-by-output produces 40.1, 46.9, … on the same inputs.
  *   - The overflow-recovery path's "use detectedContextLimit for next
  *     pressure pass" contract is unimplementable if Pi keeps reporting
- *     its own percent — that field is locked to Pi's `contextWindow`
+ *     its own percent — that field is locked to OMP's `contextWindow`
  *     from settings/models.json and cannot be re-divided by the
  *     post-overflow limit.
  *

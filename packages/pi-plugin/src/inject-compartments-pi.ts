@@ -67,7 +67,7 @@ type PiAgentMessage = PiUserMessage | PiAssistantMessage | PiToolResultMessage;
  * trim raw history because the cutoff id never matches anything in the
  * AgentMessage[] view.
  *
- * Pi's `pi.on("context")` event delivers `AgentMessage[]` only, with no
+ * OMP's `pi.on("context")` event delivers `AgentMessage[]` only, with no
  * back-reference to the SessionEntry layer. Caller is responsible for
  * walking `ctx.sessionManager.getBranch()`, filtering to message-type
  * entries (the same filter `buildSessionContext` applies), and producing
@@ -347,7 +347,7 @@ export function injectSessionHistoryIntoPi(
 	// Apply the same boundary trim the shared call performed on the
 	// projection, but back to the real Pi message array. The projection
 	// already reflects the trim (its length shrank); we use the cached
-	// boundary id to do the equivalent trim on Pi.
+	// boundary id to do the equivalent trim on OMP.
 	//
 	// `compartmentEndMessageId` is nullable: a non-null non-empty value
 	// means "trim Pi messages to this boundary"; null/empty means "no

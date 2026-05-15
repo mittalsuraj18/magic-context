@@ -9,7 +9,7 @@ type TextLikeContent = { type: "text"; text: string };
 const INSTRUCTION_NAME_PATTERN = /<instruction\s+name="([^"]+)">/;
 
 /**
- * Inject a shared Magic Context nudge into Pi's LLM-bound AgentMessage array.
+ * Inject a shared Magic Context nudge into OMP's LLM-bound AgentMessage array.
  *
  * OpenCode appends/reinjects nudges onto an existing safe assistant message and
  * stores that message id as an anchor for prompt-cache stability; see
@@ -18,7 +18,7 @@ const INSTRUCTION_NAME_PATTERN = /<instruction\s+name="([^"]+)">/;
  * tool/thinking-bearing assistant messages because those may be protocol or
  * signed blocks (`nudge-injection.ts` lines 65-71 and 142-150).
  *
- * Pi's `context` event receives a fresh `AgentMessage[]` for each LLM-bound
+ * OMP's `context` event receives a fresh `AgentMessage[]` for each LLM-bound
  * transform and the handler replaces it by returning `{ messages }`, so there is
  * no long-lived Anthropic prompt-cache anchor to preserve at this layer. Rather
  * than rewriting user text or mutating a signed/tool-bearing assistant message,

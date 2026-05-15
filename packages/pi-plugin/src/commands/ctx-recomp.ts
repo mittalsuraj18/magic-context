@@ -44,13 +44,13 @@ export function registerCtxRecompCommand(
 ): void {
 	pi.registerCommand("ctx-recomp", {
 		description:
-			"Rebuild Magic Context compartments from raw Pi session history",
+			"Rebuild Magic Context compartments from raw OMP session history",
 		handler: async (args, ctx) => {
 			const sessionId = resolveSessionId(ctx);
 			if (!sessionId) {
 				sendCtxStatusMessage(pi, {
 					title: "/ctx-recomp",
-					text: "## Magic Recomp\n\nNo active Pi session is available.",
+					text: "## Magic Recomp\n\nNo active OMP session is available.",
 					level: "error",
 				});
 				return;
@@ -104,7 +104,7 @@ export function registerCtxRecompCommand(
 				text:
 					parsed.kind === "partial"
 						? `## Magic Recomp\n\nPartial recomp started for range ${parsed.range.start}-${parsed.range.end}.`
-						: "## Magic Recomp\n\nHistorian recomp started. Rebuilding compartments and facts from raw Pi session history now.",
+						: "## Magic Recomp\n\nHistorian recomp started. Rebuilding compartments and facts from raw OMP session history now.",
 				level: "info",
 			});
 

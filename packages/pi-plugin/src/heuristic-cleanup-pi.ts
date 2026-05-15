@@ -9,7 +9,7 @@
  *     OpenCode `MessageLike[]`. Pi assistant messages carry tool calls
  *     as parts of type `"toolCall"` with `{ id, name, arguments }`.
  *     OpenCode's `extractToolInfo` checks `"tool" | "tool_use" |
- *     "tool-invocation"` shapes that don't exist in Pi.
+ *     "tool-invocation"` shapes that don't exist in OMP.
  *   - Stale `ctx_reduce` removal also walks Pi shape directly. OpenCode
  *     mutates message parts to sentinels; Pi persists `tags.status='dropped'`
  *     and lets `applyFlushedStatuses` replay the existing drop path on
@@ -193,7 +193,7 @@ function collectStaleReduceCallIds(
 }
 
 /**
- * Apply heuristic cleanup to a Pi session. Mirrors OpenCode's
+ * Apply heuristic cleanup to a OMP session. Mirrors OpenCode's
  * `applyHeuristicCleanup` 1:1 in semantics; differences are limited
  * to message-shape walking for tool fingerprinting (everything else
  * goes through `TagTarget` and shared helpers).

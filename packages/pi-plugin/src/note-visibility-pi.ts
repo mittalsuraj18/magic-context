@@ -9,7 +9,7 @@
  *   - Assistant message with content array containing
  *     `{ type: "toolCall", name: "ctx_note", arguments: { action: "read" } }`
  *
- * Pi's tool result message lives separately (`role: "toolResult"`), but
+ * OMP's tool result message lives separately (`role: "toolResult"`), but
  * for visibility purposes the toolCall part on the assistant is what
  * tells us the read happened. The corresponding result is irrelevant
  * — even if the result was stripped, the call itself in context is

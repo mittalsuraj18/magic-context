@@ -21,7 +21,7 @@ export function registerCtxFlushCommand(
 			if (!sessionId) {
 				sendCtxStatusMessage(pi, {
 					title: "/ctx-flush",
-					text: "## /ctx-flush\n\nNo active Pi session is available.",
+					text: "## /ctx-flush\n\nNo active OMP session is available.",
 					level: "error",
 				});
 				return;

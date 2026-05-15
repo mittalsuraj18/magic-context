@@ -1,7 +1,7 @@
 /**
- * Magic Context — Pi coding agent extension.
+ * Magic Context — OMP extension.
  *
- * Loaded once per Pi session via `pi.extensions` in package.json. Boots
+ * Loaded once per OMP session via `omp.extensions` in package.json. Boots
  * Magic Context's shared SQLite store and registers session lifecycle
  * hooks: tools, transform pipeline (tagging + drops), historian trigger,
  * /ctx-aug command, system-prompt injection, dreamer scheduling, and
@@ -156,7 +156,7 @@ setHarness("pi");
 // Config-driven resolvers
 //
 // Step 5b replaced the env-var stop-gaps with `loadPiConfig()` which reads
-// $cwd/.pi/magic-context.jsonc (project) + ~/.pi/agent/magic-context.jsonc
+// $cwd/.omp/magic-context.jsonc (project) + ~/.omp/agent/magic-context.jsonc
 // (user) and merges them through the shared Zod schema. The resolvers below
 // adapt the schema-shaped config into the Pi-specific options the various
 // registration helpers expect.
@@ -172,7 +172,7 @@ function resolveSidekickFromConfig(
 	if (!sidekick?.enabled) return undefined;
 	const model = sidekick.model?.trim();
 	if (!model || model.length === 0) return undefined;
-	// Pi's PiSidekickConfig is intentionally narrower than OpenCode's
+	// OMP's PiSidekickConfig is intentionally narrower than OpenCode's
 	// SidekickConfig — no fallback_models because PiSubagentRunner currently
 	// runs a single model (fallback chain handling would need a wrapper
 	// retry loop, see `subagent-runner.ts`). System prompt + timeout are
@@ -201,7 +201,7 @@ function resolveHistorianFromConfig(
 	// scales with the HISTORIAN model's own context window so a single
 	// historian call doesn't overflow.
 	//
-	// We don't know the main session's model at boot (Pi reports it via
+	// We don't know the main session's model at boot (OMP reports it via
 	// `ctx.getContextUsage()` per turn), so we approximate `mainContextLimit`
 	// using the historian model's resolved limit. For most users the
 	// session model has equal-or-larger context than the historian model
@@ -296,12 +296,12 @@ function resolveDreamerFromConfig(
 }
 
 /**
- * Pi extension default export. Called once per Pi session.
+ * OMP extension default export. Called once per OMP session.
  *
  * Registers the full Magic Context Pi runtime: tools, transform pipeline
  * (tagging + drops), historian trigger, nudges, auto-search hint,
  * /ctx-aug command, system-prompt injection, and dreamer scheduling.
- * All driven by the user's `magic-context.jsonc` (Pi convention paths).
+ * All driven by the user's `magic-context.jsonc` (OMP convention paths).
  */
 export default async function (pi: ExtensionAPI): Promise<void> {
 	const storageDir = getMagicContextStorageDir();
@@ -376,7 +376,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 				: ""),
 	);
 
-	// Council finding #5: warn loudly if Pi's configured embedding model
+	// Council finding #5: warn loudly if OMP's configured embedding model
 	// disagrees with the model that the project's stored embedding vectors
 	// were produced under. Cross-harness search relies on cosine similarity
 	// between vectors from the SAME model — a mismatch silently returns
@@ -452,7 +452,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 
 	// Register the per-LLM-call transform pipeline. Tags eligible message
 	// parts via the shared Tagger and applies queued drops from
-	// `pending_ops` so /ctx-flush and ctx_reduce work against Pi sessions.
+	// `pending_ops` so /ctx-flush and ctx_reduce work against OMP sessions.
 	const historianConfig = resolveHistorianFromConfig(config);
 	if (historianConfig) {
 		historianConfig.onStatusChange = (ctx) => {
@@ -487,7 +487,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 							minChars: config.experimental.caveman_text_compression.min_chars,
 						}
 					: undefined,
-			// Forward the user's clear_reasoning_age. Pi previously hardcoded
+			// Forward the user's clear_reasoning_age. OMP previously hardcoded
 			// 30, ignoring this config entirely. Schema default is 50 (matches
 			// OpenCode `magic-context.ts:303`).
 			clearReasoningAge: config.clear_reasoning_age,
@@ -601,7 +601,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 			// Council finding #7: thread real embedding + memory config so
 			// dreamer can do semantic dedup AND can write memory updates.
 			// Previously hardcoded to off/false, making most dreamer tasks
-			// useless on Pi.
+			// useless on OMP.
 			embeddingConfig: config.embedding,
 			memoryEnabled: config.memory.enabled,
 		});
@@ -620,7 +620,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	// resulting prompt stays cache-stable across turns when nothing
 	// material has changed.
 	//
-	// Pi has prefix caching the same way OpenCode does — every major
+	// OMP has prefix caching the same way OpenCode does — every major
 	// LLM provider (Anthropic, OpenAI, Codex, GitHub Copilot, etc.)
 	// caches the system prompt portion of the prefix. Drift between
 	// turns busts the cache and the user pays full input price for the
@@ -758,7 +758,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	// runs.
 	//
 	// REGRESSION FIXED HERE: Earlier code awaited `awaitInFlightHistorians()`
-	// inside this handler with the (incorrect) assumption that Pi's event
+	// inside this handler with the (incorrect) assumption that OMP's event
 	// fanout is synchronous and ignores returned Promises. In reality
 	// pi-coding-agent's `extensions/runner.js` does `await handler(event, ctx)`
 	// for every extension `agent_end` handler, and `agent-session.js`
@@ -771,7 +771,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	// invariant magic-context is supposed to provide.
 	//
 	// Why fire-and-forget is safe in interactive mode:
-	//   - The Pi process stays alive between turns. The next turn's
+	//   - The OMP process stays alive between turns. The next turn's
 	//     `pi.on("context")` handler checks `inFlightHistorian.has(sessionId)`
 	//     and skips re-firing while a previous historian is still
 	//     running, so we never double-spawn.
@@ -785,9 +785,9 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	//     next session start re-evaluates and either picks up where the
 	//     prior run left off or recovers from `historian_failure_count`.
 	//
-	// `pi --print` (single-turn, exits after agent_end) is the one mode
+	// `omp --print` (single-turn, exits after agent_end) is the one mode
 	// where backgrounding is genuinely incompatible with subprocess
-	// lifetime — Pi's process exits and SIGKILLs the still-running
+	// lifetime — OMP's process exits and SIGKILLs the still-running
 	// historian. That tradeoff is intentional: print mode is for
 	// scripting / one-shot tasks where blocking the user's interactive
 	// shell on a 30s historian is also wrong, just in a different way.
@@ -896,10 +896,10 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		}
 	});
 
-	// Cancel Pi's native context compaction. Magic Context owns the
+	// Cancel OMP's native context compaction. Magic Context owns the
 	// compacted view of conversation history through its own historian
 	// pipeline (compartments + facts + memories rendered as
-	// `<session-history>` in `pi.on("context")`). If Pi's auto-compaction
+	// `<session-history>` in `pi.on("context")`). If OMP's auto-compaction
 	// were to run, it would:
 	//   1. Pack the full conversation into a single plain-text user
 	//      message and ask the LLM to summarize it. For sessions with a
@@ -911,7 +911,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	//      compartment / fact / memory state we depend on.
 	//
 	// Returning `{ cancel: true }` aborts both the threshold-driven
-	// auto-compact and the post-overflow recovery compact. Pi treats
+	// auto-compact and the post-overflow recovery compact. OMP treats
 	// the abort as a no-op and proceeds with the unmodified branch on
 	// the next turn — at which point our `pi.on("context")` transform
 	// shrinks the prompt via tag drops, caveman compression, and
@@ -923,7 +923,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	// trims the prefix before Pi ever evaluates `shouldCompact`. The
 	// hook is the safety net for everything else: migrated sessions
 	// without a compaction marker, sessions where historian failed,
-	// or any future flow where Pi's heuristic decides to compact.
+	// or any future flow where OMP's heuristic decides to compact.
 	pi.on("session_before_compact", async () => {
 		info("session_before_compact: cancelling — magic-context owns compaction");
 		return { cancel: true };
@@ -935,7 +935,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	// prefix from `output.text` before the assistant message lands in
 	// `opencode.db`.
 	//
-	// Pi's `agent-session.ts` emits `message_end` to extensions BEFORE
+	// OMP's `agent-session.ts` emits `message_end` to extensions BEFORE
 	// calling `sessionManager.appendMessage(event.message)`. Mutating
 	// the message reference in this handler is therefore visible to
 	// the persistence call — same effect as OpenCode's hook on a
@@ -945,7 +945,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	// see on prior assistant messages and emit `§4§ Yes...` at the
 	// start of a fresh response. The mimicry is harmless for cache
 	// (we re-strip and re-inject on the next transform pass), but the
-	// stored text is what Pi's UI renders — without this scrub, users
+	// stored text is what OMP's UI renders — without this scrub, users
 	// see internal tag IDs at the start of every assistant turn.
 	pi.on("message_end", async (event, ctx) => {
 		try {
@@ -1038,10 +1038,10 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 			// hook-handlers.ts `tool.execute.after` for `todowrite`).
 			//
 			// Why message_end and not tool_execution_start:
-			//   Pi's `tool_execution_start` only fires for tools Pi has
+			//   OMP's `tool_execution_start` only fires for tools Pi has
 			//   actually executed (i.e. tools the agent registered).
 			//   The mocked todowrite in tests — and any user-driven
-			//   custom todowrite-shaped tool that isn't in Pi's registry
+			//   custom todowrite-shaped tool that isn't in OMP's registry
 			//   — would not trigger `tool_execution_start`. Reading the
 			//   assistant message at `message_end` catches every
 			//   todowrite-shaped `toolCall` block regardless of whether
@@ -1097,7 +1097,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 			warn("message_end: persist session_meta usage failed:", err);
 		}
 
-		// Overflow recovery: if Pi's assistant message ended with a
+		// Overflow recovery: if OMP's assistant message ended with a
 		// provider context-overflow error (`message.errorMessage` matches
 		// a known overflow pattern), record the recovery flag in
 		// session_meta so the next transform pass treats this session as
@@ -1151,7 +1151,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 	// the handle invalidates the cache entry, but the Map still returns
 	// the closed handle on the next `openDatabase()` call after reload,
 	// causing every tool/hook to fail with "database is not open". The
-	// DB handle is intentionally process-lifetime — Pi's `/reload`
+	// DB handle is intentionally process-lifetime — OMP's `/reload`
 	// re-runs the extension code but keeps the host process alive, so
 	// the cached handle is still valid across reload boundaries.
 	pi.on("session_shutdown", async (_event, ctx) => {
@@ -1165,7 +1165,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		// before the process exits.
 		//
 		// 5-second cap protects interactive shutdown from a hung
-		// subagent. In `pi --print` mode the process exits after
+		// subagent. In `omp --print` mode the process exits after
 		// agent_end before this handler fires anyway, so the cap
 		// doesn't help that mode (and we don't pretend it does — see
 		// the comment block on the agent_end handler above).
@@ -1210,7 +1210,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 				clearPiSystemPromptSession(sessionId);
 				// Drain context-handler session-keyed maps too. Without
 				// this, sessions accumulate state across `session_shutdown`
-				// in long-lived Pi processes that re-init the extension.
+				// in long-lived OMP processes that re-init the extension.
 				clearContextHandlerSession(sessionId);
 			}
 		} catch {
@@ -1218,11 +1218,11 @@ export default async function (pi: ExtensionAPI): Promise<void> {
 		}
 	});
 
-	// Pi has no `session_deleted` event, but `session_before_switch`
+	// OMP has no `session_deleted` event, but `session_before_switch`
 	// fires when the user switches to a different session within the
-	// same Pi process. That's the right moment to drain caches keyed
+	// same OMP process. That's the right moment to drain caches keyed
 	// by the OUTGOING session id — without this, every session swap
-	// in a long-running Pi process leaks one entry per cache, and
+	// in a long-running OMP process leaks one entry per cache, and
 	// after dozens of swaps the maps balloon. Cleanup here mirrors
 	// OpenCode's `session.deleted` handler in `event-handler.ts`.
 	pi.on("session_before_switch", (_event, ctx) => {
