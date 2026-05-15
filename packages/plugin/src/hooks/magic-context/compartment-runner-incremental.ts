@@ -12,7 +12,6 @@ import { cleanupHistorianStateFile, maybeWriteHistorianStateFile } from "./histo
 
 export {
     cleanupHistorianStateFile,
-    HISTORIAN_STATE_DIR,
     HISTORIAN_STATE_INLINE_THRESHOLD,
     maybeWriteHistorianStateFile,
 } from "./historian-state-file";
@@ -24,6 +23,7 @@ import {
     clearEmergencyRecovery,
     clearHistorianFailureState,
     incrementHistorianFailure,
+    setPendingCompactionMarkerState,
 } from "../../features/magic-context/storage";
 import { updateSessionMeta } from "../../features/magic-context/storage-meta";
 import { insertUserMemoryCandidates } from "../../features/magic-context/user-memory/storage-user-memory";
@@ -144,10 +144,15 @@ export async function runCompartmentAgent(deps: CompartmentRunnerDeps): Promise<
                   ? `${memoryBlock}\n\nThis is your first run. No existing compartments or facts.`
                   : "This is your first run. No existing state.";
 
-        // Write large existing state to a temp file so the prompt body stays
-        // within HTTP/SDK serialization limits. Historian reads the file via
-        // its built-in Read tool. File is deleted in finally{}.
-        stateFilePath = maybeWriteHistorianStateFile(sessionId, existingState);
+        // Write large existing state to a project-local temp file so the
+        // prompt body stays within HTTP/SDK serialization limits. The file
+        // lives under <project>/.opencode/magic-context/historian/ so OpenCode's
+        // permission system treats it as project-internal and historian's Read
+        // tool call never triggers an `external_directory` prompt. Deleted in
+        // finally{}. The session directory is resolved a few lines below; we
+        // need to pass `directory` here because `sessionDirectory` isn't bound
+        // yet at this point in the flow.
+        stateFilePath = maybeWriteHistorianStateFile(sessionId, existingState, directory);
         if (stateFilePath) {
             sessionLog(
                 sessionId,
@@ -232,6 +237,24 @@ export async function runCompartmentAgent(deps: CompartmentRunnerDeps): Promise<
             return;
         }
 
+        // Plan v6 §4: when the runner is preserving the injection cache AND
+        // compaction-marker injection is enabled, defer marker movement until
+        // a later materializing transform pass. We persist a pending blob
+        // INSIDE the same publish transaction so a crash between publish and
+        // drain cannot leave the marker out of sync — either both land or
+        // neither does. The drain in transform-postprocess-phase consumes the
+        // blob via `applyDeferredCompactionMarker`.
+        //
+        // Direct apply (legacy path) still fires for non-deferring callers
+        // (recomp / partial-recomp / explicit flushes), which clear the
+        // injection cache eagerly anyway.
+        const deferMarkerApplication =
+            deps.preserveInjectionCacheUntilConsumed === true &&
+            deps.experimentalCompactionMarkers === true;
+
+        const lastCompartmentEnd = lastNewEnd;
+        const lastNewEndMessageId = newCompartments[newCompartments.length - 1]?.endMessageId;
+
         // Append new compartments (existing stay untouched in DB) and replace facts atomically
         // Intentional: nested transaction — appendCompartments/replaceSessionFacts have their own
         // transactions for standalone safety. SQLite SAVEPOINTs handle nesting correctly in Bun.
@@ -245,15 +268,22 @@ export async function runCompartmentAgent(deps: CompartmentRunnerDeps): Promise<
             // stays — it's the authoritative real limit and remains valuable
             // for pressure math going forward.
             clearEmergencyRecovery(db, sessionId);
+            if (deferMarkerApplication && lastNewEndMessageId) {
+                setPendingCompactionMarkerState(db, sessionId, {
+                    ordinal: lastCompartmentEnd,
+                    endMessageId: lastNewEndMessageId,
+                    publishedAt: Date.now(),
+                });
+            }
         })();
-        // Invalidate in-memory injection cache so the next transform rebuilds <session-history>
-        // with the new compartments/facts. Without this, cached stale content persists.
-        clearInjectionCache(sessionId);
-        // Signal the caller that the next transform MUST treat itself as cache-
-        // busting. Otherwise a defer pass would rebuild <session-history> with
-        // new compartments and silently change message[0] → provider cache bust
-        // without a legitimate scheduler signal. See council Finding #9.
-        deps.onInjectionCacheCleared?.(sessionId);
+        // Background publication normally preserves the injection cache until
+        // a materializing pass can rebuild history and apply queued drops
+        // together. Explicit recomp paths leave preserve=false and invalidate
+        // immediately.
+        if (deps.preserveInjectionCacheUntilConsumed !== true) {
+            clearInjectionCache(sessionId);
+        }
+        deps.onCompartmentStatePublished?.(sessionId);
         // Issue #44: gate promotion behind both `memory.enabled` and
         // `memory.auto_promote`. Without this, historian unconditionally
         // wrote project memories (with embeddings) even for users who
@@ -267,17 +297,23 @@ export async function runCompartmentAgent(deps: CompartmentRunnerDeps): Promise<
             );
         }
 
-        const lastCompartmentEnd = lastNewEnd;
         queueDropsForCompartmentalizedMessages(db, sessionId, lastCompartmentEnd);
 
-        // Inject compaction marker into OpenCode's DB if experimental flag is enabled
+        // Inject compaction marker into OpenCode's DB if experimental flag is enabled.
+        // When deferring (plan v6 §4), the pending blob was already written
+        // in-transaction and `onDeferredMarkerPending` signals the drain set.
+        // When NOT deferring, fall back to the legacy direct-apply path.
         if (deps.experimentalCompactionMarkers) {
-            updateCompactionMarkerAfterPublication(
-                db,
-                sessionId,
-                lastCompartmentEnd,
-                sessionDirectory,
-            );
+            if (deferMarkerApplication) {
+                deps.onDeferredMarkerPending?.(sessionId);
+            } else {
+                updateCompactionMarkerAfterPublication(
+                    db,
+                    sessionId,
+                    lastCompartmentEnd,
+                    sessionDirectory,
+                );
+            }
         }
 
         // Run compression pass if history block exceeds budget

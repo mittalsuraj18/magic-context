@@ -34,6 +34,7 @@
  * as the OpenCode `messages-transform` wrapper.
  */
 
+import * as crypto from "node:crypto";
 import { getLastCompartmentEndMessage } from "@magic-context/core/features/magic-context/compartment-storage";
 import { resolveProjectIdentity } from "@magic-context/core/features/magic-context/memory/project-identity";
 import {
@@ -52,9 +53,12 @@ import {
 } from "@magic-context/core/features/magic-context/storage";
 import { getOrCreateSessionMeta } from "@magic-context/core/features/magic-context/storage-meta";
 import {
+	clearDeferredExecutePendingIfMatches,
 	clearEmergencyRecovery,
 	getOverflowState,
 	getPersistedStickyTurnReminder,
+	peekDeferredExecutePending,
+	setDeferredExecutePendingIfAbsent,
 	setPersistedStickyTurnReminder,
 } from "@magic-context/core/features/magic-context/storage-meta-persisted";
 import {
@@ -65,6 +69,10 @@ import {
 	applyFlushedStatuses,
 	applyPendingOperations,
 } from "@magic-context/core/hooks/magic-context/apply-operations";
+import {
+	applyMidTurnDeferral,
+	detectMidTurnBypassReason,
+} from "@magic-context/core/hooks/magic-context/boundary-execution";
 import { replayCavemanCompression } from "@magic-context/core/hooks/magic-context/caveman-cleanup";
 import { checkCompartmentTrigger } from "@magic-context/core/hooks/magic-context/compartment-trigger";
 import { resolveExecuteThreshold } from "@magic-context/core/hooks/magic-context/event-resolvers";
@@ -83,7 +91,6 @@ import {
 	readRawSessionMessages,
 	setRawMessageProvider,
 } from "@magic-context/core/hooks/magic-context/read-session-chunk";
-
 import { log, sessionLog } from "@magic-context/core/shared/logger";
 import type { SubagentRunner } from "@magic-context/core/shared/subagent-runner";
 import { tagTranscript } from "@magic-context/core/shared/tag-transcript";
@@ -114,7 +121,8 @@ import {
 	runPiCompressionPassIfNeeded,
 } from "./pi-compressor-runner";
 import { type PiHistorianDeps, runPiHistorian } from "./pi-historian-runner";
-import { readPiSessionMessages } from "./read-session-pi";
+import { injectSyntheticTodowriteForPi } from "./pi-todo-inject";
+import { isMidTurnPi, readPiSessionMessages } from "./read-session-pi";
 import {
 	buildMessageIdToMaxTag,
 	clearOldReasoningPi,
@@ -893,11 +901,33 @@ export function registerPiContextHandler(
 			// pass. Read live context usage from Pi (tokens/percent) and
 			// the persisted session-meta record (last_response_time,
 			// cache_ttl).
+			// Prefer the OpenCode-equivalent pressure persisted by
+			// `message_end` in `index.ts`. `session_meta.lastContextPercentage`
+			// is computed from the assistant message's `usage` with the
+			// same formula OpenCode uses (input + cacheRead + cacheWrite,
+			// divided by `effectiveContextLimit` which already factors in
+			// `detected_context_limit`). Pi's built-in `getContextUsage()`
+			// `percent` field includes output tokens, which causes a
+			// small but real drift in tests and a much larger drift after
+			// a provider overflow recovery sets a lower detected limit.
+			// Fall back to `piUsage` on the first pass before message_end
+			// has had a chance to run.
+			const sessionMetaForUsage = getOrCreateSessionMeta(options.db, sessionId);
 			const piUsage = ctx.getContextUsage?.();
-			let usagePercentage =
-				typeof piUsage?.percent === "number" ? piUsage.percent : 0;
-			const usageInputTokens =
-				typeof piUsage?.tokens === "number" ? piUsage.tokens : 0;
+			let usagePercentage = 0;
+			let usageInputTokens = 0;
+			if (
+				sessionMetaForUsage.lastContextPercentage > 0 &&
+				sessionMetaForUsage.lastInputTokens > 0
+			) {
+				usagePercentage = sessionMetaForUsage.lastContextPercentage;
+				usageInputTokens = sessionMetaForUsage.lastInputTokens;
+			} else {
+				usagePercentage =
+					typeof piUsage?.percent === "number" ? piUsage.percent : 0;
+				usageInputTokens =
+					typeof piUsage?.tokens === "number" ? piUsage.tokens : 0;
+			}
 			let usageContextLimit =
 				typeof piUsage?.contextWindow === "number" && piUsage.contextWindow > 0
 					? piUsage.contextWindow
@@ -943,7 +973,7 @@ export function registerPiContextHandler(
 				);
 			}
 
-			const sessionMeta = getOrCreateSessionMeta(options.db, sessionId);
+			const sessionMeta = sessionMetaForUsage;
 			const modelKey = liveModelBySession.get(sessionId);
 			let schedulerDecision: "execute" | "defer";
 			try {
@@ -992,6 +1022,37 @@ export function registerPiContextHandler(
 					`pi transform: large imported session detected (${piMessageCount} messages, no usage baseline) — forcing execute on first pass`,
 				);
 			}
+
+			const schedulerDecisionEarly = schedulerDecision;
+			const midTurn = isMidTurnPi(event, sessionId);
+			const bypassReason = detectMidTurnBypassReason({
+				contextUsage: { percentage: usagePercentage },
+				sessionMeta,
+				historyRefreshSessions,
+				sessionId,
+			});
+
+			const { midTurnAdjustedSchedulerDecision, sideEffect } =
+				applyMidTurnDeferral({
+					base: schedulerDecisionEarly,
+					bypassReason,
+					midTurn,
+				});
+
+			if (sideEffect === "set-flag") {
+				const flagPayload = {
+					id: crypto.randomUUID(),
+					reason: `${schedulerDecisionEarly}-${bypassReason}`,
+					recordedAt: Date.now(),
+				};
+				setDeferredExecutePendingIfAbsent(options.db, sessionId, flagPayload);
+			}
+
+			schedulerDecision = midTurnAdjustedSchedulerDecision;
+			sessionLog(
+				sessionId,
+				`pi [boundary-exec] base=${schedulerDecisionEarly} bypass=${bypassReason} midTurn=${midTurn} effective=${midTurnAdjustedSchedulerDecision} sideEffect=${sideEffect}`,
+			);
 
 			// Force-materialization @ 85%+: aggressive drop-all-tools mode.
 			// Mirrors OpenCode transform-postprocess-phase.ts:145-146.
@@ -1204,6 +1265,53 @@ export function registerPiContextHandler(
 						`pi auto-search failed: ${err instanceof Error ? err.message : String(err)}`,
 					);
 				}
+			}
+
+			// Synthetic todowrite injection — Pi parity with OpenCode's
+			// transform-postprocess-phase.ts B7. On cache-busting passes,
+			// inject a Pi-shape toolCall + toolResult pair built from the
+			// `session_meta.last_todo_state` snapshot captured by
+			// `tool_execution_start` in index.ts. On defer passes, replay
+			// the same pair from the persisted snapshot to keep wire bytes
+			// byte-identical (Anthropic prompt cache stability).
+			//
+			// Cache-busting gate parity: OpenCode uses
+			// `isCacheBustingPass = shouldApplyPendingOps || shouldRunHeuristics`
+			// (transform-postprocess-phase.ts:273). Pi's `isCacheBusting`
+			// flag from the outer handler only covers history refresh
+			// (historian publication), so we OR it with `result.heuristicsExecuted`
+			// — the Pi equivalent of "execute pass that actually mutated
+			// state" — to match OpenCode's semantics.
+			//
+			// Subagents skip — they don't get synthetic injection in
+			// OpenCode either (see B7 `args.fullFeatureMode` gate).
+			try {
+				const sessionMetaForTodo = getOrCreateSessionMeta(
+					options.db,
+					sessionId,
+				);
+				if (
+					!sessionMetaForTodo.isSubagent &&
+					sessionMetaForTodo.lastTodoState !== ""
+				) {
+					const isCacheBustingForTodo =
+						isCacheBusting || result.heuristicsExecuted;
+					outputMessages = injectSyntheticTodowriteForPi({
+						db: options.db,
+						sessionId,
+						isSubagent: sessionMetaForTodo.isSubagent,
+						isCacheBusting: isCacheBustingForTodo,
+						lastTodoState: sessionMetaForTodo.lastTodoState,
+						messages: outputMessages as unknown as Parameters<
+							typeof injectSyntheticTodowriteForPi
+						>[0]["messages"],
+					}) as unknown as typeof outputMessages;
+				}
+			} catch (err) {
+				sessionLog(
+					sessionId,
+					`pi synthetic todowrite injection failed: ${err instanceof Error ? err.message : String(err)}`,
+				);
 			}
 
 			// Cast the rebuilt array back to the AgentMessage[] shape Pi's
@@ -1553,32 +1661,56 @@ function maybeFireHistorian(args: {
 		return;
 	}
 
-	// Pi exposes ctx.getContextUsage() returning { tokens, contextWindow,
-	// percent }. We map to OpenCode's ContextUsage shape ({ percentage,
-	// inputTokens }) used by the shared trigger.
+	// Prefer OpenCode-equivalent pressure persisted by message_end.
+	// Pi's built-in `ctx.getContextUsage()` reports total-tokens
+	// percent (input + output + cache), but historian/trigger math
+	// expects wire-input pressure (input + cacheRead + cacheWrite).
+	// `session_meta.lastContextPercentage` carries the corrected value
+	// computed by `pi-pressure.ts` against the effective context
+	// limit (with detected_context_limit override applied).
 	let usage: { percentage: number; inputTokens: number };
 	try {
-		const piUsage = ctx.getContextUsage?.();
+		const sessionMetaForUsage = getOrCreateSessionMeta(db, sessionId);
 		if (
-			!piUsage ||
-			piUsage.tokens === null ||
-			piUsage.percent === null ||
-			piUsage.contextWindow === 0
+			sessionMetaForUsage.lastContextPercentage > 0 &&
+			sessionMetaForUsage.lastInputTokens > 0
 		) {
+			usage = {
+				percentage: sessionMetaForUsage.lastContextPercentage,
+				inputTokens: sessionMetaForUsage.lastInputTokens,
+			};
 			sessionLog(
 				sessionId,
-				`pi-historian trigger eval: no usage info yet (tokens=${piUsage?.tokens ?? "<no piUsage>"}, percent=${piUsage?.percent ?? "<no piUsage>"}, contextWindow=${piUsage?.contextWindow ?? "<no piUsage>"})`,
+				`pi-historian trigger eval: usage=${usage.percentage.toFixed(1)}% (${usage.inputTokens} tokens) [from session_meta], checking trigger...`,
 			);
-			return;
+		} else {
+			// Fallback to Pi-reported usage when no message_end has
+			// landed yet (first turn). This is the same fallback the
+			// original implementation used; the +output token drift
+			// of ~0.1% is acceptable on the first turn before
+			// message_end runs.
+			const piUsage = ctx.getContextUsage?.();
+			if (
+				!piUsage ||
+				piUsage.tokens === null ||
+				piUsage.percent === null ||
+				piUsage.contextWindow === 0
+			) {
+				sessionLog(
+					sessionId,
+					`pi-historian trigger eval: no usage info yet (tokens=${piUsage?.tokens ?? "<no piUsage>"}, percent=${piUsage?.percent ?? "<no piUsage>"}, contextWindow=${piUsage?.contextWindow ?? "<no piUsage>"})`,
+				);
+				return;
+			}
+			usage = {
+				percentage: piUsage.percent,
+				inputTokens: piUsage.tokens,
+			};
+			sessionLog(
+				sessionId,
+				`pi-historian trigger eval: usage=${usage.percentage.toFixed(1)}% (${usage.inputTokens} tokens) [piUsage fallback], checking trigger...`,
+			);
 		}
-		usage = {
-			percentage: piUsage.percent,
-			inputTokens: piUsage.tokens,
-		};
-		sessionLog(
-			sessionId,
-			`pi-historian trigger eval: usage=${usage.percentage.toFixed(1)}% (${usage.inputTokens} tokens), checking trigger...`,
-		);
 	} catch (err) {
 		sessionLog(
 			sessionId,
@@ -1600,6 +1732,18 @@ function maybeFireHistorian(args: {
 	let triggered = false;
 	try {
 		if (isFirstContextPassForSession) {
+			const sessionMeta = getOrCreateSessionMeta(db, sessionId);
+			if (
+				sessionMeta.compartmentInProgress &&
+				!inFlightHistorian.has(sessionId)
+			) {
+				updateSessionMeta(db, sessionId, { compartmentInProgress: false });
+				sessionLog(
+					sessionId,
+					"pi-historian: cleared stale compartmentInProgress flag on first context pass after restart",
+				);
+			}
+
 			const failureState = getHistorianFailureState(db, sessionId);
 			const shouldRecoverOnFirstPass =
 				failureState.failureCount > 0 &&
@@ -1764,6 +1908,8 @@ interface RunPipelineResult {
 }
 
 async function runPipeline(args: RunPipelineArgs): Promise<RunPipelineResult> {
+	let executedWorkThisPass = false;
+
 	// 0. Inject temporal `<!-- +Xm -->` markers into user messages
 	// BEFORE tagging so the §N§ tag prefix wraps around our marker on
 	// re-tagging. Idempotent: existing markers are detected by regex
@@ -1852,16 +1998,25 @@ async function runPipeline(args: RunPipelineArgs): Promise<RunPipelineResult> {
 		args.forceMaterialization ||
 		hasPendingMaterializeSignal
 	) {
-		applyPendingOperations(
-			args.sessionId,
-			args.db,
-			targets,
-			args.protectedTags,
-		);
-		// Drain only after success — if applyPendingOperations throws
-		// the flag stays set so the next pass retries.
-		if (hasPendingMaterializeSignal) {
-			consumePendingMaterialization(args.sessionId);
+		try {
+			applyPendingOperations(
+				args.sessionId,
+				args.db,
+				targets,
+				args.protectedTags,
+			);
+			executedWorkThisPass = true;
+			// Drain only after success — if applyPendingOperations throws
+			// the flag stays set so the next pass retries.
+			if (hasPendingMaterializeSignal) {
+				consumePendingMaterialization(args.sessionId);
+			}
+		} catch (err) {
+			sessionLog(
+				args.sessionId,
+				`pi pending operations failed: ${err instanceof Error ? err.message : String(err)}`,
+			);
+			throw err;
 		}
 	}
 
@@ -2006,6 +2161,7 @@ async function runPipeline(args: RunPipelineArgs): Promise<RunPipelineResult> {
 				},
 			);
 			heuristicsExecuted = true;
+			executedWorkThisPass = true;
 		} catch (err) {
 			sessionLog(
 				args.sessionId,
@@ -2047,6 +2203,7 @@ async function runPipeline(args: RunPipelineArgs): Promise<RunPipelineResult> {
 					);
 				}
 			}
+			executedWorkThisPass = true;
 		} catch (err) {
 			sessionLog(
 				args.sessionId,
@@ -2103,6 +2260,24 @@ async function runPipeline(args: RunPipelineArgs): Promise<RunPipelineResult> {
 		messages: args.messages,
 		isCacheBusting: args.isCacheBusting,
 	});
+
+	if (executedWorkThisPass) {
+		try {
+			const currentFlag = peekDeferredExecutePending(args.db, args.sessionId);
+			if (currentFlag !== null) {
+				clearDeferredExecutePendingIfMatches(
+					args.db,
+					args.sessionId,
+					currentFlag,
+				);
+			}
+		} catch (err) {
+			sessionLog(
+				args.sessionId,
+				`pi [boundary-exec] drain failed (continuing): ${err}`,
+			);
+		}
+	}
 
 	const outputMessages = transcript.getOutputMessages();
 

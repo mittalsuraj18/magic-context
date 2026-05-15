@@ -42,7 +42,10 @@ function getProjectConfigPaths(cwd: string): string[] {
 function getUserConfigPaths(): string[] {
 	const home = process.env.HOME ?? homedir();
 	const agentDir = process.env.PI_CODING_AGENT_DIR?.trim();
-	const ompBasePath = join(agentDir || join(home, ".omp", "agent"), CONFIG_FILE_NAME);
+	const ompBasePath = join(
+		agentDir || join(home, ".omp", "agent"),
+		CONFIG_FILE_NAME,
+	);
 	const legacyPiBasePath = join(home, ".pi", "agent", CONFIG_FILE_NAME);
 	return [
 		`${ompBasePath}.jsonc`,

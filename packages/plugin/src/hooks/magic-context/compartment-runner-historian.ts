@@ -1,11 +1,11 @@
 import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HISTORIAN_AGENT, HISTORIAN_EDITOR_AGENT } from "../../agents/historian";
 import { DEFAULT_HISTORIAN_TIMEOUT_MS } from "../../config/schema/magic-context";
 import type { PluginContext } from "../../plugin/types";
 import * as shared from "../../shared";
 import { extractLatestAssistantText } from "../../shared/assistant-message-extractor";
+import { getProjectMagicContextHistorianDir } from "../../shared/data-path";
 import { describeError, getErrorMessage } from "../../shared/error-message";
 import { buildHistorianEditorPrompt } from "./compartment-prompt";
 import type {
@@ -19,10 +19,16 @@ import {
     validateHistorianOutput,
 } from "./compartment-runner-validation";
 
-// Intentionally kept: historian validation failure dumps are preserved for debugging.
-// These are written to /tmp and survive until manual cleanup or OS temp pruning.
-// The user has explicitly requested keeping these dumps for now (see audit #21).
-const HISTORIAN_RESPONSE_DUMP_DIR = join(tmpdir(), "magic-context-historian");
+// Intentionally kept: historian validation failure dumps are preserved for
+// debugging. They land in the project-local historian dir
+// (<project>/.opencode/magic-context/historian/) so they sit inside the
+// project boundary OpenCode's permission system already trusts AND so users
+// debugging a failed run can find dumps next to the project they belong to.
+// The user has explicitly requested keeping these dumps for now (see audit
+// #21); they survive until manual cleanup.
+function historianResponseDumpDir(directory: string): string {
+    return getProjectMagicContextHistorianDir(directory);
+}
 const MAX_HISTORIAN_RETRIES = 2;
 
 interface HistorianModelOverride {
@@ -340,6 +346,7 @@ async function runHistorianPrompt(args: {
 
         const dumpPath = dumpHistorianResponse(
             parentSessionId,
+            sessionDirectory,
             dumpLabel ?? "historian-response",
             result,
         );
@@ -356,15 +363,13 @@ async function runHistorianPrompt(args: {
         };
     } finally {
         if (agentSessionId) {
-            await client.session
-                .delete({ path: { id: agentSessionId }, query: { directory: sessionDirectory } })
-                .catch((e: unknown) => {
-                    shared.sessionLog(
-                        parentSessionId,
-                        "compartment agent: session cleanup failed",
-                        getErrorMessage(e),
-                    );
-                });
+            await client.session.delete({ path: { id: agentSessionId } }).catch((e: unknown) => {
+                shared.sessionLog(
+                    parentSessionId,
+                    "compartment agent: session cleanup failed",
+                    getErrorMessage(e),
+                );
+            });
         }
     }
 }
@@ -500,15 +505,18 @@ function cleanupHistorianDump(sessionId: string, dumpPath?: string): void {
     }
 }
 
-function dumpHistorianResponse(sessionId: string, label: string, text: string): string | undefined {
+function dumpHistorianResponse(
+    sessionId: string,
+    directory: string,
+    label: string,
+    text: string,
+): string | undefined {
     try {
-        mkdirSync(HISTORIAN_RESPONSE_DUMP_DIR, { recursive: true });
+        const dumpDir = historianResponseDumpDir(directory);
+        mkdirSync(dumpDir, { recursive: true });
         const safeSessionId = sanitizeDumpName(sessionId);
         const safeLabel = sanitizeDumpName(label);
-        const dumpPath = join(
-            HISTORIAN_RESPONSE_DUMP_DIR,
-            `${safeSessionId}-${safeLabel}-${Date.now()}.xml`,
-        );
+        const dumpPath = join(dumpDir, `${safeSessionId}-${safeLabel}-${Date.now()}.xml`);
         writeFileSync(dumpPath, text, "utf8");
         shared.sessionLog(sessionId, "compartment agent: historian response dumped", {
             label,

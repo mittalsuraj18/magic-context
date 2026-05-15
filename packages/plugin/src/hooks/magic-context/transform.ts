@@ -1,3 +1,4 @@
+import * as crypto from "node:crypto";
 import { getLastCompartmentEndMessage } from "../../features/magic-context/compartment-storage";
 import { resolveProjectIdentity } from "../../features/magic-context/memory/project-identity";
 import { scheduleReconciliation } from "../../features/magic-context/message-index-async";
@@ -19,6 +20,8 @@ import type { PluginContext } from "../../plugin/types";
 import { BoundedSessionMap } from "../../shared/bounded-session-map";
 import { getErrorMessage } from "../../shared/error-message";
 import { sessionLog } from "../../shared/logger";
+import { applyMidTurnDeferral, detectMidTurnBypassReason } from "./boundary-execution";
+import { canConsumeDeferredOnThisPass } from "./cache-busting-signals";
 import { replayCavemanCompression } from "./caveman-cleanup";
 import { getActiveCompartmentRun, startCompartmentAgent } from "./compartment-runner";
 import { FORCE_MATERIALIZE_PERCENTAGE } from "./compartment-trigger";
@@ -36,6 +39,7 @@ import {
     getRawSessionMessageCount,
     readRawSessionMessages,
 } from "./read-session-chunk";
+import { isMidTurn } from "./read-session-db";
 import { estimateTokens } from "./read-session-formatting";
 
 import { sendIgnoredMessage } from "./send-session-notification";
@@ -67,6 +71,7 @@ import {
     clearHistorianFailureState,
     clearPersistedReasoningWatermark,
     getOverflowState,
+    setDeferredExecutePendingIfAbsent,
 } from "../../features/magic-context/storage-meta-persisted";
 import type { LiveModelBySession } from "./hook-handlers";
 
@@ -144,7 +149,10 @@ function findLastAssistantModel(
 export interface TransformDeps {
     tagger: Tagger;
     scheduler: Scheduler;
-    contextUsageMap: Map<string, { usage: ContextUsage; updatedAt: number }>;
+    contextUsageMap: Map<
+        string,
+        { usage: ContextUsage; updatedAt: number; lastResponseTime?: number }
+    >;
     nudger: (
         sessionId: string,
         contextUsage: ContextUsage,
@@ -175,12 +183,14 @@ export interface TransformDeps {
      * See Oracle review 2026-04-26 for the three-set split rationale.
      */
     historyRefreshSessions: Set<string>;
+    deferredHistoryRefreshSessions?: Set<string>;
     /**
      * Persistent signal that pending ops + heuristics need to materialize.
      * Survives across defer passes when `compartmentRunning` blocks the
      * heuristic pass. Drained only after `shouldRunHeuristics` succeeds.
      */
     pendingMaterializationSessions: Set<string>;
+    deferredMaterializationSessions?: Set<string>;
     lastHeuristicsTurnId: Map<string, string>;
     commitSeenLastPass?: Map<string, boolean>;
     client?: PluginContext["client"];
@@ -264,6 +274,9 @@ export interface TransformDeps {
 export function createTransform(deps: TransformDeps) {
     const loadedSessions = new Set<string>();
     const lastEmergencyNotificationCount = new Map<string, number>();
+    const deferredHistoryRefreshSessions = deps.deferredHistoryRefreshSessions ?? new Set<string>();
+    const deferredMaterializationSessions =
+        deps.deferredMaterializationSessions ?? new Set<string>();
 
     return async (
         _input: Record<string, never>,
@@ -501,18 +514,53 @@ export function createTransform(deps: TransformDeps) {
             sessionId,
             deps.getModelKey?.(sessionId),
         );
-        // isCacheBusting controls whether the injection cache is bypassed.
-        // Reads ONLY `historyRefreshSessions` (the narrow injection-rebuild
-        // signal) — NOT `pendingMaterializationSessions`. This separation
-        // is the core of Oracle's review fix: a blocked materialization
-        // request (e.g. compartmentRunning during /ctx-flush) keeps the
-        // pending-materialization flag alive but does NOT keep forcing
-        // injection rebuilds on every defer pass.
+        const midTurn = isMidTurn(deps, resolvedSessionId);
+        const bypassReason = detectMidTurnBypassReason({
+            contextUsage: contextUsageEarly,
+            sessionMeta,
+            historyRefreshSessions: deps.historyRefreshSessions,
+            sessionId,
+        });
+
+        const { midTurnAdjustedSchedulerDecision, sideEffect } = applyMidTurnDeferral({
+            base: schedulerDecisionEarly,
+            bypassReason,
+            midTurn,
+        });
+
+        if (sideEffect === "set-flag") {
+            const flagPayload = {
+                id: crypto.randomUUID(),
+                reason: `${schedulerDecisionEarly}-${bypassReason}`,
+                recordedAt: Date.now(),
+            };
+            setDeferredExecutePendingIfAbsent(db, sessionId, flagPayload);
+        }
+
+        sessionLog(
+            sessionId,
+            `[boundary-exec] base=${schedulerDecisionEarly} bypass=${bypassReason} midTurn=${midTurn} effective=${midTurnAdjustedSchedulerDecision} sideEffect=${sideEffect}`,
+        );
+        // Capture explicit history refresh immediately before the first
+        // prepareCompartmentInjection consumer and before any drain. This is a
+        // per-pass local, not shared deps state: concurrent transforms must not
+        // overwrite each other's explicit/deferred attribution.
         //
-        // Drained right after `prepareCompartmentInjection` finishes (see
-        // below), so two consecutive defer passes after one historian
-        // publish only rebuild once.
-        const isCacheBusting = deps.historyRefreshSessions.has(sessionId);
+        const historyRefreshExplicitBeforePrepare = deps.historyRefreshSessions.has(sessionId);
+        const earlyActiveRunBlocksMaterialization =
+            (getActiveCompartmentRun(sessionId) !== undefined ||
+                sessionMeta.compartmentInProgress) &&
+            contextUsageEarly.percentage < FORCE_MATERIALIZE_PERCENTAGE;
+        const canConsumeDeferredEarly = canConsumeDeferredOnThisPass({
+            schedulerDecision: midTurnAdjustedSchedulerDecision,
+            contextPercentage: contextUsageEarly.percentage,
+            justAwaitedPublication: false,
+            activeRunBlocksMaterialization: earlyActiveRunBlocksMaterialization,
+        });
+        const consumingDeferredEarly =
+            canConsumeDeferredEarly && deferredHistoryRefreshSessions.has(sessionId);
+        const isCacheBusting = historyRefreshExplicitBeforePrepare || consumingDeferredEarly;
+        const historyBustThisPass = isCacheBusting;
         if (historianFailureState.failureCount === 0) {
             lastEmergencyNotificationCount.delete(sessionId);
         }
@@ -563,17 +611,17 @@ export function createTransform(deps: TransformDeps) {
                 // Historian publication invalidates the injection cache AND
                 // changes compartments/facts that render into message[0]. We
                 // signal:
-                //   - historyRefreshSessions: triggers ONE rebuild on the next
-                //     transform pass (drained immediately after rebuild).
-                //   - pendingMaterializationSessions: queues drops that
-                //     historian published; persists until heuristics actually
-                //     run (e.g. when compartmentRunning lifts).
+                //   - deferredHistoryRefreshSessions: rebuilds only when a
+                //     materializing pass can consume history + drops together.
+                //   - deferredMaterializationSessions: queues drops that
+                //     historian published until heuristics actually run.
                 // We deliberately do NOT signal systemPromptRefreshSessions —
                 // historian doesn't change disk-backed adjuncts (docs/profile/
                 // key-files), so re-reading them would burn IO for nothing.
-                onInjectionCacheCleared: (sid) => {
-                    deps.historyRefreshSessions.add(sid);
-                    deps.pendingMaterializationSessions.add(sid);
+                preserveInjectionCacheUntilConsumed: true,
+                onCompartmentStatePublished: (sid) => {
+                    deferredHistoryRefreshSessions.add(sid);
+                    deferredMaterializationSessions.add(sid);
                 },
             });
             skipCompartmentAwaitForThisPass = true;
@@ -654,6 +702,7 @@ export function createTransform(deps: TransformDeps) {
             : undefined;
 
         let pendingCompartmentInjection: PreparedCompartmentInjection | null = null;
+        let rebuiltHistoryFromInitialPrepare = false;
         if (fullFeatureMode) {
             const tInj = performance.now();
             pendingCompartmentInjection = prepareCompartmentInjection(
@@ -673,7 +722,7 @@ export function createTransform(deps: TransformDeps) {
             // passes within the same TTL window MUST hit the cached
             // injection result so the Anthropic prompt-cache prefix
             // stays stable. The captured local `isCacheBusting` const
-            // above retains its value for downstream `cacheAlreadyBusting`
+            // above retains its value for downstream background-compressor
             // gating, so this drain doesn't affect later behavior in this
             // pass — only future passes.
             //
@@ -683,6 +732,17 @@ export function createTransform(deps: TransformDeps) {
             // re-fired prepareCompartmentInjection with isCacheBusting=true
             // and burned cache reuse for nothing.
             if (isCacheBusting) {
+                // Cache-busting pass invoked prepareCompartmentInjection. Treat
+                // this as a history rebuild regardless of whether the prepare
+                // returned a populated injection — even a null result (no
+                // compartments yet) consumes the deferred-history signal
+                // because the next pass will get a fresh prepare. The
+                // separate `compartmentInjectionRebuiltFromDb` flag (plan v6)
+                // exposes the narrower "real rebuild happened" signal to
+                // postprocess for the marker-drain decision.
+                rebuiltHistoryFromInitialPrepare = true;
+            }
+            if (historyRefreshExplicitBeforePrepare) {
                 deps.historyRefreshSessions.delete(sessionId);
             }
         }
@@ -964,7 +1024,7 @@ export function createTransform(deps: TransformDeps) {
 
         // Reuse the early scheduler result — inputs haven't changed.
         const contextUsage = contextUsageEarly;
-        const schedulerDecision = schedulerDecisionEarly;
+        const schedulerDecision = midTurnAdjustedSchedulerDecision;
         const rawGetNotifParams = deps.getNotificationParams;
         const tCompartmentPhase = performance.now();
         const compartmentPhase = await runCompartmentPhase({
@@ -991,8 +1051,12 @@ export function createTransform(deps: TransformDeps) {
                 : undefined,
             // The compressor needs to know if this is a safe pass to run on.
             // Scheduler "execute" passes are safe for compressor (they already bust cache
-            // via pending ops), but isCacheBusting is now narrower (flush-only) for injection cache.
-            cacheAlreadyBusting: isCacheBusting || schedulerDecisionEarly === "execute",
+            // via pending ops), but standalone compression is suppressed when
+            // this pass itself is consuming a history refresh.
+            safeForBackgroundCompression:
+                isCacheBusting || midTurnAdjustedSchedulerDecision === "execute",
+            suppressBackgroundCompressionThisPass: historyBustThisPass,
+            deferredHistoryRefreshSessions,
             skipAwaitForThisPass: skipCompartmentAwaitForThisPass,
             experimentalCompactionMarkers: deps.experimentalCompactionMarkers,
             experimentalUserMemories: deps.experimentalUserMemories,
@@ -1009,9 +1073,9 @@ export function createTransform(deps: TransformDeps) {
             // See startRecoveryRun above for the full rationale —
             // historian/recomp publication signals history rebuild +
             // pending materialization, but NOT system-prompt adjuncts.
-            onInjectionCacheCleared: (sid) => {
-                deps.historyRefreshSessions.add(sid);
-                deps.pendingMaterializationSessions.add(sid);
+            onCompartmentStatePublished: (sid) => {
+                deferredHistoryRefreshSessions.add(sid);
+                deferredMaterializationSessions.add(sid);
             },
         });
         pendingCompartmentInjection = compartmentPhase.pendingCompartmentInjection;
@@ -1019,6 +1083,22 @@ export function createTransform(deps: TransformDeps) {
         const compartmentInProgress = compartmentPhase.compartmentInProgress;
         sessionMeta = { ...sessionMeta, compartmentInProgress };
         logTransformTiming(sessionId, "compartmentPhase", tCompartmentPhase);
+
+        const lateActiveRunBlocksMaterialization =
+            getActiveCompartmentRun(sessionId) !== undefined &&
+            contextUsageEarly.percentage < FORCE_MATERIALIZE_PERCENTAGE;
+        const canConsumeDeferredLate = canConsumeDeferredOnThisPass({
+            schedulerDecision: midTurnAdjustedSchedulerDecision,
+            contextPercentage: contextUsageEarly.percentage,
+            justAwaitedPublication: compartmentPhase.justAwaitedPublication,
+            activeRunBlocksMaterialization: lateActiveRunBlocksMaterialization,
+        });
+        const wasEmergencyBlock =
+            contextUsageEarly.percentage >= FORCE_MATERIALIZE_PERCENTAGE &&
+            compartmentPhase.justAwaitedPublication;
+        const historyRebuiltThisPass = wasEmergencyBlock
+            ? compartmentPhase.rebuiltHistoryThisPass
+            : rebuiltHistoryFromInitialPrepare || compartmentPhase.rebuiltHistoryThisPass;
 
         const tPostProcess = performance.now();
         await runPostTransformPhase({
@@ -1044,7 +1124,13 @@ export function createTransform(deps: TransformDeps) {
             fullFeatureMode,
             canRunCompartments,
             awaitedCompartmentRun,
+            phaseJustAwaitedPublication: compartmentPhase.justAwaitedPublication,
             compartmentInProgress,
+            historyRefreshExplicitBeforePrepare,
+            compartmentInjectionRebuiltFromDb: pendingCompartmentInjection?.rebuiltFromDb === true,
+            rebuiltHistoryFromInitialPrepare,
+            historyRebuiltThisPass,
+            canConsumeDeferredLate,
             sessionMeta,
             currentTurnId,
             // Postprocess reads pendingMaterializationSessions to decide
@@ -1052,6 +1138,8 @@ export function createTransform(deps: TransformDeps) {
             // drains it after heuristics actually run. NOT the history
             // set — postprocess doesn't refresh `<session-history>`.
             pendingMaterializationSessions: deps.pendingMaterializationSessions,
+            deferredHistoryRefreshSessions,
+            deferredMaterializationSessions,
             lastHeuristicsTurnId: deps.lastHeuristicsTurnId,
             autoDropToolAge: deps.autoDropToolAge,
             dropToolStructure: deps.dropToolStructure ?? true,
@@ -1065,6 +1153,7 @@ export function createTransform(deps: TransformDeps) {
             forceMaterializationPercentage: FORCE_MATERIALIZE_PERCENTAGE,
             hasRecentReduceCall,
             projectPath: deps.projectPath,
+            sessionDirectory,
             autoSearch: deps.autoSearch,
             // Only forward caveman config when ctx_reduce is disabled — the
             // feature replaces manual ctx_reduce text-dropping for users

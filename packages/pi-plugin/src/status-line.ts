@@ -1,8 +1,5 @@
 import type { ContextDatabase } from "@magic-context/core/features/magic-context/storage";
-import type {
-	ExtensionAPI,
-	ExtensionContext,
-} from "@oh-my-pi/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
 const STATUS_KEY = "magic-context";
 const RECENT_FAILURE_MS = 60_000;

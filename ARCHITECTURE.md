@@ -1,5 +1,13 @@
 # Architecture
 
+## Key-files v6 architecture
+
+Key files are project-scoped, not session-scoped. The Dreamer aggregates primary-session read history, asks an AFT-enabled subagent to produce one stitched content block per chosen file, validates the single-file contract, then commits rows into `project_key_files`. The plugin computes each row's `content_hash` from disk at commit time; unreadable files use the `"<missing>"` sentinel and start with `stale_reason = 'missing'`.
+
+Every replacement commit runs under `BEGIN IMMEDIATE`, verifies the Dreamer lease with a pure read, deletes/reinserts the project's rows, and bumps `project_key_files_version` in the same transaction. System-prompt injection caches `{value, version}` per session and recomputes only on first access, cache-bust, or version mismatch, preserving prompt-cache byte stability while allowing OpenCode and Pi to invalidate each other through the shared SQLite version row.
+
+Injection renders only stored DB content. Disk drift queues a CAS-protected stale update and never changes the bytes already being rendered; stale writes do not bump the version because they do not affect `<key-files>` output. Subagent sessions skip before the version lookup so subagents never poison or consume key-files context.
+
 > All `src/` paths below are relative to `packages/plugin/` — the published npm package.
 
 ## Pattern Overview
@@ -89,6 +97,13 @@
 3. Run the transform from `src/hooks/magic-context/transform.ts` — tag messages, load session state, prepare compartment injection, and schedule deferred work. On every pass (including defer), replay persisted reasoning clearing using `replayClearedReasoning()` and `replayStrippedInlineThinking()` from `src/hooks/magic-context/strip-content.ts`; replay caveman compression via `replayCavemanCompression()` and `stripReasoningFromMergedAssistants()` (Anthropic-only); replay stripped placeholders and structural noise. The merged-assistant reasoning strip and the empty-content sentinel handling are provider-aware (Anthropic-specific vs. generic).
 4. Run postprocessing in `src/hooks/magic-context/transform-postprocess-phase.ts` — apply pending ops, heuristic cleanup, reasoning cleanup, stale reduce-call cleanup, compartment rendering, nudge placement, deferred-note nudges, **synthetic-todowrite injection (B7)**, and auto-search hint generation. Stripped placeholder message IDs are read from `stripped_placeholder_ids` in `session_meta` (via `src/features/magic-context/storage-meta-persisted.ts`) and replayed on every pass; the persisted set is updated when new empty shells are detected on cache-busting passes only.
 5. Persist session state through storage helpers exported by `src/features/magic-context/storage.ts`.
+
+**Boundary execution:**
+- Scheduler `execute` decisions are deferred when the latest assistant turn is still mid-tool-use, unless a bypass applies. The gate lives in `src/hooks/magic-context/boundary-execution.ts`: base `defer` always stays `defer`; base `execute` with no bypass becomes `defer` + a CAS-protected `session_meta.deferred_execute_state` flag when mid-turn.
+- The goal is cache stability: avoid mutating tool/history/reasoning state in the middle of a multi-step assistant turn, because that would rebuild message bytes and bust provider prompt-cache writes while the turn is still accumulating tool calls.
+- Bypass reasons are deliberately narrow: `force-materialize` at ≥85% usage (including overflow recovery already folded into percentage), `explicit-bust` when `historyRefreshSessions` is set (paired-producer invariant: every producer also signals pending materialization), and `subagent` (one parent-turn lifetime). No config knob controls this behavior.
+- Draining uses a re-peek-and-drain pattern. The early gate may set a durable flag with `setDeferredExecutePendingIfAbsent`; the end of postprocess only re-peeks and CAS-clears with `clearDeferredExecutePendingIfMatches` after execute-gated work completed successfully on that pass. Success means the shared execute try-block reached its success point, not that any mutation count was non-zero.
+- Pi mirrors OpenCode semantics in `packages/pi-plugin/src/context-handler.ts`: it uses the same decision module, `isMidTurnPi`, the same `deferred_execute_state` CAS helpers, and drains after dropped-placeholder stripping but before token accounting. For the same scheduler/base/bypass/mid-turn input, OpenCode and Pi must produce the same effective execute/defer decision.
 
 **System-prompt adjunct injection:**
 - The `experimental.chat.system.transform` hook in `src/hooks/magic-context/system-prompt-hash.ts` injects four adjunct blocks into the system prompt array: `<project-docs>` (root `ARCHITECTURE.md` + `STRUCTURE.md` when `dreamer.inject_docs=true`), `<user-profile>` (active user memories when `dreamer.user_memories.enabled=true`), `<key-files>` (session-scoped pinned files when `dreamer.pin_key_files.enabled=true`), and Magic Context agent guidance text (when `system_prompt_injection.enabled=true` and the active agent isn't matched by `skip_signatures`).
@@ -199,10 +214,10 @@
 - Location: `src/features/magic-context/plugin-messages.ts`
 - Pattern: Vestigial — superseded by RPC. Module remains for forward-compat with older TUI plugin versions that may still poll it; no active runtime callers in current code.
 
-**Compaction markers:**
-- Purpose: Inject OpenCode-compatible compaction boundaries into the message table so `filterCompacted` stops at historian's last compartment boundary, shrinking the transform-input array.
-- Location: `src/features/magic-context/compaction-marker.ts`, `src/hooks/magic-context/compaction-marker-manager.ts`
-- Pattern: Write summary/compaction rows into OpenCode's DB after historian publishes; filter them out from raw reads. Stable feature (default `compaction_markers: true` since v0.16.x); raw-history readers strip `summary=true` / `finish="stop"` rows to preserve original ordinals.
+**Compaction markers (deferred drain, plan v6):**
+- Purpose: Inject OpenCode-compatible compaction boundaries into the message table so `filterCompacted` stops at historian's last compartment boundary, shrinking the transform-input array. Marker movement is deferred from historian publish into the next materializing transform pass so a single cache-bust cycle covers both the `<session-history>` rebuild AND the marker boundary advance.
+- Location: `src/features/magic-context/compaction-marker.ts`, `src/hooks/magic-context/compaction-marker-manager.ts`, `src/features/magic-context/storage-meta-persisted.ts` (pending blob helpers).
+- Pattern: Historian / compressor incremental runners write the prospective new boundary (`{ordinal, endMessageId, publishedAt}`) into `session_meta.pending_compaction_marker_state` in the same transaction that publishes new compartments. The next consuming transform pass that drains `deferredHistoryRefreshSessions` calls `applyDeferredCompactionMarker(...)`, which validates the pending target against the latest stored compartment via `getCompartmentsByEndMessageId(...)` plus an OpenCode-message existence check via `getOpenCodeMessageById(...)`, then sequences `removeCompactionMarker` → `injectCompactionMarker`. Returns a tagged `MarkerUpdateOutcome` (`applied` | `already-current` | `stale-skip` | `retryable-failure`); only `retryable-failure` preserves the deferred-history signal so the next pass retries. CAS-clear (`clearPendingCompactionMarkerStateIf`) on success guards against publish/drain races within and across processes. Eager paths (`/ctx-flush`, `/ctx-recomp`) call the marker manager directly and CAS-clear any stale pending blob. Restart-safe: hook init calls `getSessionsWithPendingMarker(...)` to rehydrate deferred sets so the next pass after restart still drains. `event-handler` CAS-clears pending state on `session.compacted` (provider already advanced the boundary) and on `session.deleted` via cascade. Raw-history readers strip `summary=true` / `finish="stop"` rows to preserve original ordinals. Stable feature, default `compaction_markers: true` since v0.16.x; deferred drain since v0.19 (plan v6).
 
 **Auto-update checker:**
 - Purpose: Self-update the cached `@latest` plugin install once per plugin process — OpenCode's plugin cache no longer auto-updates.
@@ -238,6 +253,11 @@
 - Purpose: Store per-session scalars and JSON blobs that must survive across transform passes and OpenCode restarts.
 - Location: `src/features/magic-context/storage-meta-shared.ts`, `src/features/magic-context/storage-meta-persisted.ts`, `src/features/magic-context/storage-meta-session.ts`, `src/features/magic-context/storage-meta.ts`
 - Pattern: `session_meta` SQLite table with `ensureColumn()` and versioned migrations; typed row interfaces with runtime guards; NULL coercion in `isSessionMetaRow()` so legacy rows don't trigger fallback-to-defaults on every read.
+
+**Cache-busting signals (plan v6):**
+- Purpose: Surface durable per-pass facts the postprocess phase uses to decide whether the v12 deferred-history drain, the deferred-marker drain, and the deferred-materialization drain are eligible to fire — without re-reading transform state.
+- Location: `src/hooks/magic-context/cache-busting-signals.ts`, threaded into `RunPostTransformPhaseArgs` (`historyRebuiltThisPass`, `historyRefreshExplicitBeforePrepare`, `compartmentInjectionRebuiltFromDb`, `canConsumeDeferredLate`, `phaseJustAwaitedPublication`, etc.).
+- Pattern: Captured at well-defined points in `transform.ts` (e.g. `historyRefreshExplicitBeforePrepare` is read immediately before `prepareCompartmentInjection`, not later) so concurrent transform passes don't clobber each other's signals. The drain decision (`historyWasConsumedThisPass`) combines `historyRebuiltThisPass && (canConsumeDeferredLate || phaseJustAwaitedPublication || explicitRebuildHappened) && materializationSatisfied`. Degraded-cache state (null-boundary rebuild) is tracked by `degradedCacheCountBySession` in postprocess; entry logs in `inject-compartments.ts` and a warning at `DEGRADE_CACHE_WARNING_THRESHOLD=10` consecutive degraded rebuilds.
 
 ## Entry Points
 
@@ -327,7 +347,7 @@ Magic Context runs in three effective modes depending on `ctx_reduce_enabled` an
 
 **Storage:** Use the SQLite database created by `src/features/magic-context/storage-db.ts` under the cortexkit data directory resolved by `src/shared/data-path.ts` (`~/.local/share/cortexkit/magic-context/context.db` on Linux/macOS, XDG-equivalent on Windows). Legacy OpenCode-plugin-folder DBs are migrated forward on first boot. The same DB is shared cross-harness between OpenCode and Pi; session-scoped tables include a `harness` discriminator (`'opencode'` / `'pi'`) while project-scoped tables (memories, git commits) are shared.
 
-**Schema migrations:** `src/features/magic-context/migrations.ts` declares versioned migrations v1–v11 (v10 added `tool_owner_message_id` for composite tool-tag identity; v11 added `todo_synthetic_*` columns for synthetic-todowrite). Migration runner uses `schema_migrations` table with version-ordered execution and sibling-startup race protection (duplicate-insert is tolerated).
+**Schema migrations:** `src/features/magic-context/migrations.ts` declares versioned migrations v1–v13 (v10 added `tool_owner_message_id` for composite tool-tag identity; v11 added `todo_synthetic_*` columns for synthetic-todowrite; v12 cleaned orphan `memory_embeddings` rows and verified embedding cascade behavior; v13 added `pending_compaction_marker_state` for the plan-v6 deferred-marker drain). Migration runner uses `schema_migrations` table with version-ordered execution and sibling-startup race protection (duplicate-insert is tolerated).
 
 **Harness-aware behavior:** `src/shared/harness.ts` exposes `setHarness()`/`getHarness()` for the runtime to identify itself; production INSERTs into session-scoped tables tag rows with the current harness. Pi-specific session-resolution paths are skipped on OpenCode and vice versa.
 

@@ -1,6 +1,6 @@
 {
 	"name": "@cortexkit/omp-magic-context",
-	"version": "0.18.0",
+	"version": "0.19.0",
 	"type": "module",
 	"description": "Oh My Pi (OMP) extension for Magic Context — cross-session memory and context management",
 	"main": "dist/index.js",

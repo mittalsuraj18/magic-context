@@ -8,6 +8,7 @@ import { getErrorMessage } from "../../shared/error-message";
 import { log } from "../../shared/logger";
 import { Database } from "../../shared/sqlite";
 import { closeQuietly } from "../../shared/sqlite-helpers";
+import { deleteOrphanProjectKeyFiles } from "./key-files/project-key-files";
 import { runMigrations } from "./migrations";
 import {
     loadToolDefinitionMeasurements,
@@ -79,9 +80,12 @@ function migrateLegacyStorageIfNeeded(targetDbPath: string, targetDbDir: string)
 }
 
 export function initializeDatabase(db: Database): void {
+    // SQLite per-connection PRAGMAs. foreign_keys MUST run before any reads
+    // or writes: it defaults to OFF, which silently breaks every ON DELETE
+    // CASCADE / SET NULL declared in the schema below and in migrations.
+    db.exec("PRAGMA foreign_keys=ON");
     db.exec("PRAGMA journal_mode=WAL");
     db.exec("PRAGMA busy_timeout=5000");
-    db.exec("PRAGMA foreign_keys=ON");
     db.exec(`
     CREATE TABLE IF NOT EXISTS tags (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -179,6 +183,9 @@ export function initializeDatabase(db: Database): void {
     );
 
     CREATE TABLE IF NOT EXISTS memory_embeddings (
+      -- FK-cascade audit (v12): memory_embeddings.memory_id -> memories.id
+      -- uses ON DELETE CASCADE, so SQLite PRAGMA foreign_keys must be ON on
+      -- every connection and v12 cleans historical orphan rows.
       memory_id INTEGER PRIMARY KEY REFERENCES memories(id) ON DELETE CASCADE,
       embedding BLOB NOT NULL,
       model_id TEXT
@@ -214,6 +221,26 @@ CREATE INDEX IF NOT EXISTS idx_dream_queue_pending ON dream_queue(started_at, en
       memory_changes_json TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_dream_runs_project ON dream_runs(project_path, finished_at DESC);
+
+    CREATE TABLE IF NOT EXISTS project_key_files (
+      project_path           TEXT    NOT NULL,
+      path                   TEXT    NOT NULL,
+      content                TEXT    NOT NULL,
+      content_hash           TEXT    NOT NULL,
+      local_token_estimate   INTEGER NOT NULL,
+      generated_at           INTEGER NOT NULL,
+      generated_by_model     TEXT,
+      generation_config_hash TEXT    NOT NULL,
+      stale_reason           TEXT,
+      PRIMARY KEY (project_path, path)
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_key_files_project ON project_key_files(project_path);
+    CREATE INDEX IF NOT EXISTS idx_project_key_files_generated_at ON project_key_files(project_path, generated_at);
+
+    CREATE TABLE IF NOT EXISTS project_key_files_version (
+      project_path TEXT    PRIMARY KEY,
+      version      INTEGER NOT NULL DEFAULT 0
+    );
 
     -- (smart_notes: see note above; merged into unified notes table by migration v1)
 
@@ -286,7 +313,17 @@ CREATE INDEX IF NOT EXISTS idx_dream_queue_pending ON dream_queue(started_at, en
       system_prompt_hash TEXT DEFAULT '',
       memory_block_cache TEXT DEFAULT '',
       memory_block_count INTEGER DEFAULT 0,
-      memory_block_ids TEXT DEFAULT ''
+      memory_block_ids TEXT DEFAULT '',
+      -- pending_compaction_marker_state: intentionally NULLABLE without a
+      -- default. Absence of a deferred marker is SQL NULL; presence is a
+      -- valid JSON blob written via setPendingCompactionMarkerState.
+      -- Excluded from healNullTextColumns. Readers filter IS NOT NULL AND
+      -- != empty-string defensively. Plan v6 section 3.
+      pending_compaction_marker_state TEXT,
+      -- deferred_execute_state: intentionally NULLABLE without a default.
+      -- Absence is SQL NULL; presence is a JSON blob written via
+      -- setDeferredExecutePendingIfAbsent. Excluded from healNullTextColumns.
+      deferred_execute_state TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_tags_session_tag_number ON tags(session_id, tag_number);
@@ -415,6 +452,15 @@ CREATE INDEX IF NOT EXISTS idx_dream_queue_pending ON dream_queue(started_at, en
     // request, fire historian + aggressive drops) on its next transform pass.
     // Cleared once recovery succeeds.
     ensureColumn(db, "session_meta", "needs_emergency_recovery", "INTEGER DEFAULT 0");
+    // Deferred compaction-marker drain (plan v6). Intentionally NO DEFAULT
+    // clause — absence is SQL NULL, presence is a JSON blob. Reader must
+    // filter `IS NOT NULL AND != ''`. This column MUST NOT be added to
+    // `healNullTextColumns` (NULL is the load-bearing absence sentinel).
+    ensureColumn(db, "session_meta", "pending_compaction_marker_state", "TEXT");
+    // Boundary-execution deferred intent (plan v8). Intentionally NO DEFAULT
+    // clause — absence is SQL NULL, presence is a JSON blob. This column MUST
+    // NOT be added to `healNullTextColumns`.
+    ensureColumn(db, "session_meta", "deferred_execute_state", "TEXT");
 
     // NULL-column healing runs as migration v5 (one-shot at schema upgrade).
     // Previously it ran on every plugin startup — each heal function issued
@@ -623,6 +669,11 @@ export function openDatabase(databasePath?: string): Database {
         const db = new Database(dbPath);
         initializeDatabase(db);
         runMigrations(db);
+        try {
+            deleteOrphanProjectKeyFiles(db);
+        } catch (error) {
+            log(`[magic-context] key-files orphan GC failed: ${getErrorMessage(error)}`);
+        }
         // Tool-owner backfill (plan v3.3.1, Layer B). Runs once per
         // boot to populate tool_owner_message_id on legacy tool tags.
         // The backfill module short-circuits when no work is needed

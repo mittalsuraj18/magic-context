@@ -72,6 +72,59 @@
 import type { RawMessage } from "@magic-context/core/hooks/magic-context/read-session-raw";
 import type { ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
+export function isMidTurnPi(event: unknown, _sessionId: string): boolean {
+	const messages = (event as { messages?: unknown })?.messages;
+	if (!Array.isArray(messages)) return false;
+
+	let latestAssistantIndex = -1;
+	let latestAssistant: Record<string, unknown> | null = null;
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const msg = messages[i];
+		if (msg !== null && typeof msg === "object") {
+			const record = msg as Record<string, unknown>;
+			if (record.role === "assistant") {
+				latestAssistantIndex = i;
+				latestAssistant = record;
+				break;
+			}
+		}
+	}
+
+	if (latestAssistant === null) return false;
+	if (latestAssistant.stopReason === "toolUse") return true;
+
+	const toolCallIds = getToolCallIds(latestAssistant.content);
+	if (toolCallIds.size === 0) return false;
+
+	const pairedToolResultIds = new Set<string>();
+	for (const msg of messages.slice(latestAssistantIndex + 1)) {
+		if (msg === null || typeof msg !== "object") continue;
+		const record = msg as Record<string, unknown>;
+		if (record.role !== "toolResult") continue;
+		if (typeof record.toolCallId === "string") {
+			pairedToolResultIds.add(record.toolCallId);
+		}
+	}
+
+	for (const id of toolCallIds) {
+		if (!pairedToolResultIds.has(id)) return true;
+	}
+	return false;
+}
+
+function getToolCallIds(content: unknown): Set<string> {
+	const ids = new Set<string>();
+	if (!Array.isArray(content)) return ids;
+	for (const item of content) {
+		if (item === null || typeof item !== "object") continue;
+		const record = item as Record<string, unknown>;
+		if (record.type === "toolCall" && typeof record.id === "string") {
+			ids.add(record.id);
+		}
+	}
+	return ids;
+}
+
 /**
  * Read the active Pi session branch and synthesize an OpenCode-shape
  * RawMessage[]. Returns an empty array if no branch is available.
@@ -112,6 +165,22 @@ export function convertEntriesToRawMessages(entries: unknown[]): RawMessage[] {
 	// Buffer for tool-result runs waiting to fold into the next user
 	// message. Each item is the synthesized "tool" part shape.
 	let pendingToolParts: unknown[] = [];
+	// Track the first real toolResult entry id contributing to the current
+	// pending buffer. When tool-results fold into a synthetic user (the
+	// toolResult→assistant transition pattern, which is the common case
+	// for tool-heavy sessions), we need the synthetic user to carry a
+	// real, lookup-able entry id rather than an empty string.
+	//
+	// Without this, downstream consumers break:
+	//   - `read-session-chunk.ts` puts `messageId: ""` into `chunk.lines`,
+	//     which then propagates into compartment `end_message_id`, leaving
+	//     the magic-context inject path unable to trim the visible message
+	//     tail to the compartment boundary (Bug X2).
+	//   - Pi compaction-marker placement via `findFirstKeptEntryId` lands
+	//     on the synthetic ordinal and either skips (returns null → no
+	//     marker written, JSONL grows unbounded, Bug X1) or returns an
+	//     unusable id.
+	let pendingFirstRealId = "";
 
 	for (const entry of entries) {
 		if (!isMessageEntry(entry)) {
@@ -126,6 +195,9 @@ export function convertEntriesToRawMessages(entries: unknown[]): RawMessage[] {
 
 		if (role === "toolResult") {
 			pendingToolParts.push(...synthesizeToolResultParts(msg));
+			if (pendingFirstRealId === "") {
+				pendingFirstRealId = entry.id;
+			}
 			continue;
 		}
 
@@ -138,6 +210,7 @@ export function convertEntriesToRawMessages(entries: unknown[]): RawMessage[] {
 				...synthesizeUserParts(msg),
 			];
 			pendingToolParts = [];
+			pendingFirstRealId = "";
 			result.push({
 				ordinal: nextOrdinal++,
 				id: entry.id,
@@ -149,18 +222,21 @@ export function convertEntriesToRawMessages(entries: unknown[]): RawMessage[] {
 
 		if (role === "assistant") {
 			// If there are pending tool-result parts when we hit an
-			// assistant (very unusual — tool results normally precede the
-			// user that triggered the next assistant), fold them as a
-			// synthetic user turn before emitting the assistant. This
-			// preserves chunk-formatting invariants.
+			// assistant, fold them as a synthetic user turn before
+			// emitting the assistant. This is THE common pattern in
+			// tool-heavy sessions (the agent finishes a tool round and
+			// fires the next assistant turn without a user in between),
+			// so the synthetic user must carry a real entry id — the
+			// first toolResult that was folded in.
 			if (pendingToolParts.length > 0) {
 				result.push({
 					ordinal: nextOrdinal++,
-					id: "",
+					id: pendingFirstRealId,
 					role: "user",
 					parts: pendingToolParts,
 				});
 				pendingToolParts = [];
+				pendingFirstRealId = "";
 			}
 
 			result.push({
@@ -184,11 +260,13 @@ export function convertEntriesToRawMessages(entries: unknown[]): RawMessage[] {
 	}
 
 	// Tail tool-results with no following user message: emit synthetic
-	// user turn so they're still part of the chunked history.
+	// user turn so they're still part of the chunked history. As with
+	// the assistant-trigger case above, this synthetic user must carry
+	// a real entry id (the first folded toolResult).
 	if (pendingToolParts.length > 0) {
 		result.push({
 			ordinal: nextOrdinal,
-			id: "",
+			id: pendingFirstRealId,
 			role: "user",
 			parts: pendingToolParts,
 		});

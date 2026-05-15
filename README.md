@@ -189,7 +189,7 @@ npx @cortexkit/magic-context@latest doctor --issue
 
 ## Pi coding agent (beta)
 
-Magic Context is also available as a [Pi](https://github.com/mariozechner/pi-mono) extension, sharing the **same SQLite database** as the OpenCode plugin. Project memories, embeddings, dreamer state, and key-file pins are pooled across both harnesses; per-session state (tags, compartments, facts, notes) stays harness-scoped.
+Magic Context is also available as a [Pi](https://github.com/earendil-works/pi-mono) extension, sharing the **same SQLite database** as the OpenCode plugin. Project memories, embeddings, dreamer state, and key-file pins are pooled across both harnesses; per-session state (tags, compartments, facts, notes) stays harness-scoped.
 
 > ⚠️ The Pi extension is published as **beta** while it accumulates real-world usage. Core flows are validated with end-to-end tests; report issues at [github.com/cortexkit/magic-context/issues](https://github.com/cortexkit/magic-context/issues).
 
@@ -386,7 +386,7 @@ On startup, Magic Context checks for common configuration problems — OpenCode'
 A companion desktop app for browsing and managing Magic Context state outside of OpenCode.
 
 <p align="center">
-   <a href="https://github.com/cortexkit/magic-context/releases/tag/dashboard-v0.4.3"><strong>⬇️ Download for macOS · Windows · Linux</strong></a></p>
+   <a href="https://github.com/cortexkit/magic-context/releases/tag/dashboard-v0.4.5"><strong>⬇️ Download for macOS · Windows · Linux</strong></a></p>
 
 **Features:**
 - **Memory Browser** — search, filter, and edit project memories with category and project filtering

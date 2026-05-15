@@ -1,17 +1,29 @@
-import { readFileSync } from "node:fs";
-import { rpcPortFilePath } from "./rpc-utils";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import {
+    isPidAlive,
+    legacyRpcPortFilePath,
+    parseRpcPortFile,
+    type RpcPortFileRecord,
+    rpcPortDir,
+} from "./rpc-utils";
 
 const MAX_RETRIES = 10;
 const RETRY_DELAY_MS = 500;
 const REQUEST_TIMEOUT_MS = 5000;
+const MAX_RERESOLVE_ATTEMPTS = 3;
+const NON_RETRYABLE_RPC_ERROR = Symbol("nonRetryableRpcError");
+type NonRetryableRpcError = Error & { [NON_RETRYABLE_RPC_ERROR]: true };
 
 export class MagicContextRpcClient {
     private port: number | null = null;
-    private portFilePath: string;
+    private portDir: string;
+    private legacyPortFilePath: string;
     private healthChecked = false;
 
     constructor(storageDir: string, directory: string) {
-        this.portFilePath = rpcPortFilePath(storageDir, directory);
+        this.portDir = rpcPortDir(storageDir, directory);
+        this.legacyPortFilePath = legacyRpcPortFilePath(storageDir, directory);
     }
 
     /** Call an RPC method. Retries port resolution if the server isn't ready yet. */
@@ -19,23 +31,52 @@ export class MagicContextRpcClient {
         method: string,
         params: Record<string, unknown> = {},
     ): Promise<T> {
-        const port = await this.resolvePort();
-        if (!port) {
-            throw new Error("Magic Context RPC server not available");
+        let lastError: unknown = null;
+
+        for (let attempt = 0; attempt < MAX_RERESOLVE_ATTEMPTS; attempt++) {
+            const port = await this.resolvePort();
+            if (!port) {
+                lastError = new Error("Magic Context RPC server not available");
+                this.reset();
+                continue;
+            }
+
+            try {
+                const response = await this.fetchWithTimeout(
+                    `http://127.0.0.1:${port}/rpc/${method}`,
+                    {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(params),
+                    },
+                );
+
+                if (!response.ok) {
+                    const text = await response.text();
+                    const error = new Error(`RPC ${method} failed (${response.status}): ${text}`);
+                    if (response.status >= 500) {
+                        lastError = error;
+                        this.reset();
+                        continue;
+                    }
+                    (error as NonRetryableRpcError)[NON_RETRYABLE_RPC_ERROR] = true;
+                    throw error;
+                }
+
+                return (await response.json()) as T;
+            } catch (err) {
+                if (isNonRetryableRpcError(err)) {
+                    throw err;
+                }
+                lastError = err;
+                this.reset();
+            }
         }
 
-        const response = await this.fetchWithTimeout(`http://127.0.0.1:${port}/rpc/${method}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(params),
-        });
-
-        if (!response.ok) {
-            const text = await response.text();
-            throw new Error(`RPC ${method} failed (${response.status}): ${text}`);
+        if (lastError instanceof Error) {
+            throw lastError;
         }
-
-        return (await response.json()) as T;
+        throw new Error("Magic Context RPC server not available");
     }
 
     /** Check if the RPC server is reachable. */
@@ -83,13 +124,28 @@ export class MagicContextRpcClient {
     }
 
     private readPortFile(): number | null {
+        const records: RpcPortFileRecord[] = [];
+
         try {
-            const content = readFileSync(this.portFilePath, "utf-8").trim();
-            const port = Number.parseInt(content, 10);
-            if (Number.isNaN(port) || port <= 0 || port > 65535) {
-                return null;
+            for (const entry of readdirSync(this.portDir)) {
+                if (!entry.startsWith("port-") || !entry.endsWith(".json")) continue;
+                const record = parseRpcPortFile(readFileSync(join(this.portDir, entry), "utf-8"));
+                if (!record || !isPidAlive(record.pid)) continue;
+                records.push(record);
             }
-            return port;
+        } catch {
+            // Directory may not exist yet. Fall back to the legacy file below.
+        }
+
+        if (records.length > 0) {
+            records.sort((a, b) => b.started_at - a.started_at);
+            return records[0].port;
+        }
+
+        try {
+            const record = parseRpcPortFile(readFileSync(this.legacyPortFilePath, "utf-8"));
+            if (record?.pid && !isPidAlive(record.pid)) return null;
+            return record?.port ?? null;
         } catch {
             return null;
         }
@@ -120,4 +176,8 @@ export class MagicContextRpcClient {
         this.port = null;
         this.healthChecked = false;
     }
+}
+
+function isNonRetryableRpcError(err: unknown): err is NonRetryableRpcError {
+    return typeof err === "object" && err !== null && NON_RETRYABLE_RPC_ERROR in err;
 }

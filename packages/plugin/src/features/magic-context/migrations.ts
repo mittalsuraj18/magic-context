@@ -184,6 +184,9 @@ const MIGRATIONS: Migration[] = [
                     embedding BLOB NOT NULL,
                     model_id TEXT NOT NULL,
                     created_at INTEGER NOT NULL,
+                    -- FK-cascade audit (v12): git_commit_embeddings.sha -> git_commits.sha
+                    -- uses ON DELETE CASCADE, so SQLite PRAGMA foreign_keys must be ON on
+                    -- every connection and v12 cleans historical orphan rows.
                     FOREIGN KEY(sha) REFERENCES git_commits(sha) ON DELETE CASCADE
                 );
 
@@ -456,6 +459,105 @@ const MIGRATIONS: Migration[] = [
                 db.exec(
                     "ALTER TABLE session_meta ADD COLUMN todo_synthetic_state_json TEXT DEFAULT ''",
                 );
+            }
+        },
+    },
+    {
+        version: 12,
+        description: "Clean orphan rows from FK-cascade embedding tables",
+        up: (db: Database) => {
+            const hasTable = (name: string): boolean =>
+                Boolean(
+                    db
+                        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?")
+                        .get(name),
+                );
+
+            const memoryEmbeddings = hasTable("memory_embeddings")
+                ? db
+                      .prepare(
+                          `DELETE FROM memory_embeddings
+                           WHERE memory_id NOT IN (SELECT id FROM memories)`,
+                      )
+                      .run().changes
+                : 0;
+            log(`[migrations] v12 cleaned ${memoryEmbeddings} orphan memory_embeddings row(s)`);
+
+            const gitCommitEmbeddings = hasTable("git_commit_embeddings")
+                ? db
+                      .prepare(
+                          `DELETE FROM git_commit_embeddings
+                           WHERE sha NOT IN (SELECT sha FROM git_commits)`,
+                      )
+                      .run().changes
+                : 0;
+            log(
+                `[migrations] v12 cleaned ${gitCommitEmbeddings} orphan git_commit_embeddings row(s)`,
+            );
+        },
+    },
+    {
+        version: 13,
+        description: "Add pending_compaction_marker_state column for deferred marker drain",
+        up: (db: Database) => {
+            const cols = db.prepare("PRAGMA table_info(session_meta)").all() as Array<{
+                name?: string;
+            }>;
+            // CAS blob storing the deferred compaction-marker payload between
+            // background publish (compartment-runner-incremental) and the
+            // next consuming pass (transform-postprocess-phase). Intentionally
+            // declared WITHOUT `DEFAULT ''` so absence is signalled as SQL
+            // NULL — see `getSessionsWithPendingMarker` / `healNullTextColumns`
+            // contracts in storage-db.ts. Plan v6 §3.
+            if (!cols.some((c) => c.name === "pending_compaction_marker_state")) {
+                db.exec("ALTER TABLE session_meta ADD COLUMN pending_compaction_marker_state TEXT");
+            }
+        },
+    },
+    {
+        version: 14,
+        description: "Add project-scoped key files and version counter",
+        up: (db: Database) => {
+            db.exec(`
+                CREATE TABLE IF NOT EXISTS project_key_files (
+                    project_path           TEXT    NOT NULL,
+                    path                   TEXT    NOT NULL,
+                    content                TEXT    NOT NULL,
+                    content_hash           TEXT    NOT NULL,
+                    local_token_estimate   INTEGER NOT NULL,
+                    generated_at           INTEGER NOT NULL,
+                    generated_by_model     TEXT,
+                    generation_config_hash TEXT    NOT NULL,
+                    stale_reason           TEXT,
+                    PRIMARY KEY (project_path, path)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_project_key_files_project
+                    ON project_key_files(project_path);
+                CREATE INDEX IF NOT EXISTS idx_project_key_files_generated_at
+                    ON project_key_files(project_path, generated_at);
+
+                CREATE TABLE IF NOT EXISTS project_key_files_version (
+                    project_path TEXT    PRIMARY KEY,
+                    version      INTEGER NOT NULL DEFAULT 0
+                );
+            `);
+        },
+    },
+    {
+        version: 15,
+        description: "Add deferred_execute_state column for boundary execution drain",
+        up: (db: Database) => {
+            const cols = db.prepare("PRAGMA table_info(session_meta)").all() as Array<{
+                name?: string;
+            }>;
+            // CAS blob storing the deferred-execute payload between a mid-turn
+            // scheduler execute decision and the next boundary pass that
+            // successfully runs execute work. Intentionally declared WITHOUT
+            // `DEFAULT ''` so absence is signalled as SQL NULL, matching
+            // pending_compaction_marker_state. Excluded from null-heal lists.
+            if (!cols.some((c) => c.name === "deferred_execute_state")) {
+                db.exec("ALTER TABLE session_meta ADD COLUMN deferred_execute_state TEXT");
             }
         },
     },

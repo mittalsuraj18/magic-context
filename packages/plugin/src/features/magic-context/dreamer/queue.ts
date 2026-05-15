@@ -1,4 +1,5 @@
 import type { Database } from "../../../shared/sqlite";
+import { isLeaseActive } from "./lease";
 
 export interface DreamQueueEntry {
     id: number;
@@ -26,6 +27,17 @@ export function ensureDreamQueueTable(db: Database): void {
     ).run();
 }
 
+function hasActiveDreamLease(db: Database): boolean {
+    try {
+        return isLeaseActive(db);
+    } catch (error) {
+        if (String(error).includes("no such table: dream_state")) {
+            return false;
+        }
+        throw error;
+    }
+}
+
 /** Enqueue a project for dreaming. Skips if the same project already has any queue entry (queued or running).
  *
  * @param force - When true (e.g. manual /ctx-dream), uses the lease TTL (2 min) as the stale threshold
@@ -41,15 +53,19 @@ export function enqueueDream(
     const now = Date.now();
     return db.transaction(() => {
         // Clean stale started entries before checking — prevents post-crash permanent "already queued".
-        // Scheduled runs use 2h (max dream runtime) so we don't interrupt a legitimately running dream.
-        // Manual /ctx-dream uses the lease TTL (2 min) so a crashed/killed runner doesn't permanently
-        // block the user from re-triggering.
-        const staleThresholdMs = force
-            ? 2 * 60 * 1000 // lease TTL — matches runner's own crash-recovery window
-            : 120 * 60 * 1000; // 2 hours — safe for scheduled long-running dreams
-        db.prepare(
-            "DELETE FROM dream_queue WHERE project_path = ? AND started_at IS NOT NULL AND started_at < ?",
-        ).run([projectIdentity, now - staleThresholdMs]);
+        // Age alone is not enough: a healthy long-running dream can exceed the manual 2m force
+        // threshold while still renewing its lease. Only recover stale rows when no live lease exists.
+        if (!hasActiveDreamLease(db)) {
+            // Scheduled runs use 2h (max dream runtime) so we don't interrupt a legitimately running dream.
+            // Manual /ctx-dream uses the lease TTL (2 min) so a crashed/killed runner doesn't permanently
+            // block the user from re-triggering.
+            const staleThresholdMs = force
+                ? 2 * 60 * 1000 // lease TTL — matches runner's own crash-recovery window
+                : 120 * 60 * 1000; // 2 hours — safe for scheduled long-running dreams
+            db.prepare(
+                "DELETE FROM dream_queue WHERE project_path = ? AND started_at IS NOT NULL AND started_at < ?",
+            ).run([projectIdentity, now - staleThresholdMs]);
+        }
 
         const existing = db
             .prepare<[string], { id: number }>("SELECT id FROM dream_queue WHERE project_path = ?")

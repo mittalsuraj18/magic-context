@@ -15,19 +15,16 @@ import type {
 	ExtensionCommandContext,
 	Theme,
 } from "@oh-my-pi/pi-coding-agent";
+import {
+	type Component,
+	Ellipsis,
+	matchesKey,
+	type TUI,
+	truncateToWidth,
+	visibleWidth,
+} from "@oh-my-pi/pi-tui";
 import packageJson from "../../package.json";
 import { resolveSessionId } from "../commands/pi-command-utils";
-
-interface Component {
-	handleInput?(data: string): void;
-	invalidate?(): void;
-	render(width: number): string[];
-	dispose?(): void;
-}
-
-interface TUI {
-	requestRender(): void;
-}
 
 const COLORS = {
 	system: "#c084fc",
@@ -337,64 +334,13 @@ function drawBorder(inner: string[], width: number, theme: Theme): string[] {
 	const out: string[] = [];
 	out.push(top);
 	for (const raw of inner) {
-		const line = truncateToWidth(raw, innerWidth, "…");
+		const line = truncateToWidth(raw, innerWidth, Ellipsis.Unicode);
 		const visible = visibleWidth(line);
 		const pad = " ".repeat(Math.max(0, innerWidth - visible));
 		out.push(`${side} ${line}${pad} ${side}`);
 	}
 	out.push(bottom);
 	return out;
-}
-
-function matchesKey(data: string, key: "escape" | "ctrl+c" | "return"): boolean {
-	switch (key) {
-		case "escape":
-			return data === "\x1b";
-		case "ctrl+c":
-			return data === "\x03";
-		case "return":
-			return data === "\r" || data === "\n";
-	}
-}
-
-function truncateToWidth(value: string, maxWidth: number, ellipsis: string): string {
-	if (visibleWidth(value) <= maxWidth) return value;
-	const target = Math.max(0, maxWidth - visibleWidth(ellipsis));
-	let output = "";
-	let width = 0;
-	for (const char of value) {
-		const nextWidth = width + charWidth(char);
-		if (nextWidth > target) break;
-		output += char;
-		width = nextWidth;
-	}
-	return `${output}${ellipsis}`;
-}
-
-function visibleWidth(value: string): number {
-	let width = 0;
-	let inEscape = false;
-	for (let i = 0; i < value.length; i += 1) {
-		const char = value[i];
-		if (inEscape) {
-			if (char && char >= "@" && char <= "~") inEscape = false;
-			continue;
-		}
-		if (char === "\x1b" && value[i + 1] === "[") {
-			inEscape = true;
-			i += 1;
-			continue;
-		}
-		width += charWidth(char ?? "");
-	}
-	return width;
-}
-
-function charWidth(char: string): number {
-	if (!char) return 0;
-	const code = char.codePointAt(0) ?? 0;
-	if (code === 0 || code < 32 || (code >= 0x7f && code < 0xa0)) return 0;
-	return code > 0x1100 ? 2 : 1;
 }
 
 export function buildPiStatusDetail(
@@ -602,7 +548,7 @@ export function buildPiStatusDetail(
 	};
 }
 
-function safeStringify(value: unknown): string {
+function _safeStringify(value: unknown): string {
 	try {
 		if (value === undefined || value === null) return "";
 		return typeof value === "string" ? value : JSON.stringify(value);

@@ -3,6 +3,7 @@ import { scheduleClearAndReindex } from "../../features/magic-context/message-in
 import { detectOverflow } from "../../features/magic-context/overflow-detection";
 import {
     clearHistorianFailureState,
+    clearPendingCompactionMarkerStateIf,
     clearPersistedNoteNudge,
     clearPersistedNudgePlacement,
     clearPersistedStickyTurnReminder,
@@ -13,6 +14,7 @@ import {
     getMaxTagNumberBySession,
     getOrCreateSessionMeta,
     getOverflowState,
+    getPendingCompactionMarkerState,
     getPersistedNoteNudge,
     getPersistedNudgePlacement,
     getPersistedReasoningWatermark,
@@ -48,6 +50,7 @@ import { clearNoteNudgeState } from "./note-nudger";
 import { readRawSessionMessages } from "./read-session-chunk";
 import { clearMessageTokensCache, type NudgePlacementStore } from "./transform";
 import { clearCompressorCooldown } from "./transform-compartment-phase";
+import { resetDegradedCacheCount } from "./transform-postprocess-phase";
 
 const CONTEXT_USAGE_TTL_MS = 60 * 60 * 1000;
 
@@ -56,6 +59,7 @@ type CacheTtlConfig = string | Record<string, string>;
 interface ContextUsageEntry {
     usage: ContextUsage;
     updatedAt: number;
+    lastResponseTime?: number;
 }
 
 interface MessageRemovedCleanupResult {
@@ -403,6 +407,7 @@ export function createEventHandler(deps: EventHandlerDeps) {
                             inputTokens: totalInputTokens,
                         },
                         updatedAt: now,
+                        lastResponseTime: now,
                     });
 
                     updates.lastContextPercentage = percentage;
@@ -566,6 +571,23 @@ export function createEventHandler(deps: EventHandlerDeps) {
             } catch (error) {
                 sessionLog(sessionId, "event session.compacted marker cleanup failed:", error);
             }
+            // Plan v6 §8: a user-driven OpenCode compaction makes any deferred
+            // pending marker stale (we no longer own that boundary). CAS-clear
+            // any pending blob and reset the degraded-cache counter so the
+            // next pass starts fresh.
+            try {
+                const pending = getPendingCompactionMarkerState(deps.db, sessionId);
+                if (pending) {
+                    clearPendingCompactionMarkerStateIf(deps.db, sessionId, pending);
+                }
+            } catch (error) {
+                sessionLog(
+                    sessionId,
+                    "event session.compacted pending-marker cleanup failed:",
+                    error,
+                );
+            }
+            resetDegradedCacheCount(sessionId);
             // Compaction restructures messages (deletes/replaces some). Clear the
             // per-message token cache for the whole session so the next transform
             // pass recomputes against the new shape instead of serving stale counts.
@@ -583,12 +605,16 @@ export function createEventHandler(deps: EventHandlerDeps) {
             deps.nudgePlacements.clear(sessionId);
 
             try {
-                // Read and remove compaction marker BEFORE clearSession destroys session_meta
+                // Read and remove compaction marker BEFORE clearSession destroys session_meta.
+                // Plan v6: pending_compaction_marker_state lives on the same row, so
+                // clearSession's session_meta DELETE wipes it automatically — no
+                // separate CAS-clear needed here.
                 removeCompactionMarkerForSession(deps.db, sessionId);
                 clearSession(deps.db, sessionId);
             } catch (error) {
                 sessionLog(sessionId, "event session.deleted persistence failed:", error);
             }
+            resetDegradedCacheCount(sessionId);
             deps.onSessionCacheInvalidated?.(sessionId);
             deps.onSessionDeleted?.(sessionId);
             deps.contextUsageMap.delete(sessionId);

@@ -14,10 +14,13 @@ import type {
   Memory,
   MemoryStats,
   Note,
+  PagedSessions,
   ProjectRow,
   SessionDetail,
   SessionFact,
   SessionFilter,
+  SessionMessageRow,
+  KeyFileRow,
   SessionMetaRow,
   SessionRow,
   SessionSummary,
@@ -95,6 +98,25 @@ export async function listSessions(filter?: SessionFilter): Promise<SessionRow[]
   });
 }
 
+function sanitizeSessionFilter(filter?: SessionFilter): SessionFilter {
+  const sanitized: SessionFilter = {};
+  if (filter?.harness) sanitized.harness = filter.harness;
+  if (filter?.project_identity) sanitized.project_identity = filter.project_identity;
+  if (filter?.search) sanitized.search = filter.search;
+  if (typeof filter?.is_subagent === "boolean") sanitized.is_subagent = filter.is_subagent;
+  if (typeof filter?.offset === "number") sanitized.offset = filter.offset;
+  if (typeof filter?.limit === "number") sanitized.limit = filter.limit;
+  return sanitized;
+}
+
+export async function listSessionsPaged(filter?: SessionFilter): Promise<PagedSessions> {
+  const sanitized = sanitizeSessionFilter(filter);
+
+  return invoke("list_sessions_paged", {
+    filter: Object.keys(sanitized).length > 0 ? sanitized : null,
+  });
+}
+
 export async function getSessionDetail(
   harness: Harness,
   sessionId: string,
@@ -105,8 +127,48 @@ export async function getSessionDetail(
 export async function getSessionCacheEvents(
   harness: Harness,
   sessionId: string,
+  // Caps the returned event count to the most recent N. Pass undefined or omit
+  // for the whole session — but be aware that a hot OpenCode session can emit
+  // 30k+ events (≈8MB of JSON across the Tauri IPC boundary), so chart-bound
+  // callers should always pass a small bound. The dashboard's Cache page uses
+  // 200 to match the per-session window of the global cache-events query.
+  limit?: number,
 ): Promise<DbCacheEvent[]> {
-  return invoke("get_session_cache_events", { harness, sessionId });
+  return invoke("get_session_cache_events", { harness, sessionId, limit });
+}
+
+/**
+ * Fetch cache events for a session, trimmed to at most `targetTurns` complete
+ * turns (most recent first). Use this for the Cache Hit Timeline so multi-step
+ * tool-use turns don't collapse the bar chart.
+ */
+export async function getSessionCacheEventsByTurns(
+  harness: Harness,
+  sessionId: string,
+  targetTurns: number,
+): Promise<DbCacheEvent[]> {
+  return invoke("get_session_cache_events_by_turns", {
+    harness,
+    sessionId,
+    targetTurns,
+  });
+}
+
+/**
+ * Lazy fetch for the Messages tab. Returns the full message list for a session
+ * (37k+ rows for long OpenCode sessions, ~28MB IPC payload). Only call this
+ * when the user activates the Messages tab; `getSessionDetail()` returns a
+ * cheap `messages_count` for the tab badge so we never pay this cost up front.
+ */
+export async function getSessionMessages(
+  harness: Harness,
+  sessionId: string,
+): Promise<SessionMessageRow[]> {
+  return invoke("get_session_messages", { harness, sessionId });
+}
+
+export async function getProjectKeyFiles(projectPath: string): Promise<KeyFileRow[]> {
+  return invoke("get_project_key_files", { projectPath });
 }
 
 export async function enumerateProjects(): Promise<ProjectRow[]> {
@@ -251,6 +313,11 @@ export async function saveProjectConfig(projectPath: string, content: string): P
 export async function getAvailableModels(): Promise<string[]> {
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke("get_available_models");
+}
+
+export async function getAvailablePiModels(): Promise<string[]> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke("get_available_pi_models");
 }
 
 // ── User Memory API ─────────────────────────────────────────

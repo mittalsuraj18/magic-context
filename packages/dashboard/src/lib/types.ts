@@ -79,6 +79,8 @@ export interface SessionFilter {
    * subagent sessions (which dominate the row count) are filtered server-side.
    */
   is_subagent?: boolean;
+  offset?: number;
+  limit?: number;
 }
 
 export interface SessionRow {
@@ -90,6 +92,12 @@ export interface SessionRow {
   message_count: number;
   last_activity_ms: number;
   is_subagent: boolean;
+}
+
+export interface PagedSessions {
+  rows: SessionRow[];
+  total: number;
+  has_more: boolean;
 }
 
 export interface SessionMessageRow {
@@ -120,13 +128,30 @@ export interface SessionDetail {
   project_path: string | null;
   opencode_session_json: unknown | null;
   pi_jsonl_path: string | null;
-  messages: SessionMessageRow[];
+  // Cheap counts so the Messages and Cache tab badges render without paying
+  // the cost of the underlying lists. Messages are fetched lazily by
+  // `getSessionMessages`; cache events by `getSessionCacheEvents`.
+  messages_count: number;
+  cache_events_count: number;
   compartments: Compartment[];
   facts: SessionFact[];
   notes: Note[];
   meta: SessionMetaRow | null;
   token_breakdown: ContextTokenBreakdown | null;
   pi_compaction_entries: PiCompactionEntry[];
+}
+
+export interface KeyFileRow {
+  project_path: string;
+  path: string;
+  content: string;
+  content_hash: string;
+  local_token_estimate: number;
+  generated_at: number;
+  generated_by_model: string | null;
+  generation_config_hash: string;
+  stale_reason: string | null;
+  version: number;
 }
 
 export interface ProjectRow {
@@ -286,9 +311,12 @@ export interface DbCacheEvent {
   cache_write: number;
   total_tokens: number;
   hit_ratio: number;
-  severity: "stable" | "info" | "warning" | "bust" | "full_bust";
+  severity: "stable" | "info" | "warning" | "bust" | "full_bust" | "warming";
   cause: string | null;
   agent: string | null;
+  finish?: string;
+  turn_id: string;
+  is_turn_start: boolean;
 }
 
 export interface SessionCacheStats {

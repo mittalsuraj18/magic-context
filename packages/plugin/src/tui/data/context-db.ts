@@ -10,6 +10,7 @@ import type { RpcNotificationMessage, SidebarSnapshot, StatusDetail } from "../.
 export type { SidebarSnapshot, StatusDetail };
 
 let rpcClient: MagicContextRpcClient | null = null;
+let lastReceivedNotificationId = 0;
 
 function getStorageDir(): string {
     // Plugin v0.16+ uses the shared cortexkit/magic-context path so OpenCode
@@ -30,6 +31,7 @@ export function initRpcClient(directory: string): void {
 export function closeRpc(): void {
     rpcClient?.reset();
     rpcClient = null;
+    lastReceivedNotificationId = 0;
 }
 
 const EMPTY_SNAPSHOT: SidebarSnapshot = {
@@ -103,7 +105,17 @@ function recallSidebarSnapshot(sessionId: string, fallback: SidebarSnapshot): Si
         stickySidebarCache.delete(sessionId);
         return fallback;
     }
+    if (!hasInFlightEvidence(fallback)) {
+        stickySidebarCache.delete(sessionId);
+        return fallback;
+    }
     return cached.snapshot;
+}
+
+function hasInFlightEvidence(snapshot: SidebarSnapshot): boolean {
+    return (
+        snapshot.compartmentInProgress || snapshot.historianRunning || snapshot.pendingOpsCount > 0
+    );
 }
 
 /** Fetch sidebar snapshot from the server via RPC. */
@@ -225,8 +237,15 @@ export async function consumeTuiMessages(): Promise<TuiMessage[]> {
     try {
         const result = await rpcClient.call<{ messages: RpcNotificationMessage[] }>(
             "pending-notifications",
+            { lastReceivedId: lastReceivedNotificationId },
         );
-        return (result.messages ?? []).map((m) => ({
+        const messages = result.messages ?? [];
+        for (const message of messages) {
+            if (message.id > lastReceivedNotificationId) {
+                lastReceivedNotificationId = message.id;
+            }
+        }
+        return messages.map((m) => ({
             type: m.type,
             payload: m.payload,
             sessionId: m.sessionId,

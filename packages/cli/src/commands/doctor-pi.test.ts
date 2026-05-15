@@ -121,7 +121,7 @@ function baseOptions(root: string, cwd: string, prompts: MockPrompts): RunDoctor
                 path: join(root, ".pi", "bin", "pi"),
                 source: "home",
             }),
-            getPiVersion: () => "0.71.0",
+            getPiVersion: () => "0.74.0",
             getLatestNpmVersion: () => "0.1.0",
             openDatabase: () => {
                 currentDb = createMockDb();
@@ -165,7 +165,7 @@ describe("Pi doctor", () => {
 
         expect(code).toBe(0);
         const output = prompts.messages.join("\n");
-        expect(output).toContain("PASS Pi 0.71.0 detected");
+        expect(output).toContain("PASS Pi 0.74.0 detected");
         expect(output).toContain("PASS npm:@cortexkit/pi-magic-context is registered");
         expect(output).toContain("PASS SQLite integrity_check: ok");
         expect(output).toContain("Summary: PASS");
@@ -197,6 +197,47 @@ describe("Pi doctor", () => {
         expect(output).toContain("Repair attempted; 2 item(s) changed");
     });
 
+    it("recognizes object-form Magic Context package and preserves object entries during repair", async () => {
+        const root = makeTempRoot();
+        const cwd = makeTempRoot("mc-pi-doctor-cwd-");
+        const agentDir = setEnv(root, cwd);
+        const settingsPath = join(agentDir, "settings.json");
+        writeFileSync(
+            settingsPath,
+            JSON.stringify({
+                packages: [
+                    { name: "npm:@cortexkit/pi-magic-context", version: "1.2.3" },
+                    { name: "third-party-extension", version: "9.9.9", enabled: true },
+                    "npm:other-pi-extension",
+                ],
+            }),
+        );
+        writeFileSync(
+            join(agentDir, "magic-context.jsonc"),
+            JSON.stringify({ embedding: { provider: "local" } }),
+        );
+        writeFileSync(join(cwd, ".pi", "magic-context.jsonc"), JSON.stringify({ enabled: true }));
+        const prompts = new MockPrompts();
+
+        const code = await runDoctor({
+            ...baseOptions(root, cwd, prompts),
+            force: true,
+        });
+
+        expect(code).toBe(0);
+        const settings = parseJsonc(readFileSync(settingsPath, "utf-8")) as {
+            packages?: unknown[];
+        };
+        expect(settings.packages).toEqual([
+            { name: "npm:@cortexkit/pi-magic-context", version: "1.2.3" },
+            { name: "third-party-extension", version: "9.9.9", enabled: true },
+            "npm:other-pi-extension",
+        ]);
+        const output = prompts.messages.join("\n");
+        expect(output).toContain("PASS npm:@cortexkit/pi-magic-context is registered");
+        expect(output).not.toContain("Added npm:@cortexkit/pi-magic-context");
+    });
+
     it("generates a sanitized markdown report in --issue mode without calling gh create", async () => {
         const root = makeTempRoot();
         const cwd = makeTempRoot("mc-pi-doctor-cwd-");
@@ -223,7 +264,7 @@ describe("Pi doctor", () => {
             pluginVersion: "0.1.0",
             piInstalled: true,
             piPath: join(root, ".pi", "bin", "pi"),
-            piVersion: "0.71.0",
+            piVersion: "0.74.0",
             settings: {
                 path: join(agentDir, "settings.json"),
                 exists: true,
@@ -257,6 +298,15 @@ describe("Pi doctor", () => {
                 path: join(tmpdir(), "magic-context.log"),
                 exists: true,
                 sizeKb: 1,
+            },
+            recentSessions: [],
+            historianDumps: {
+                byProject: [],
+                legacyDumps: {
+                    dir: join(tmpdir(), "pi", "magic-context", "historian"),
+                    count: 0,
+                    recent: [],
+                },
             },
         };
 

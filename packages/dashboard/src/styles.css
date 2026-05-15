@@ -725,6 +725,38 @@ body {
   background: var(--red);
 }
 
+/* ── Cache turn rows ─────────────────────────────────── */
+.cache-turn-expanded {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cache-step-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+  padding: 8px 10px;
+}
+
+.cache-step-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  min-width: 0;
+}
+
+.cache-step-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 /* ── Slide-over panel ────────────────────────────────── */
 .slide-panel-overlay {
   position: fixed;

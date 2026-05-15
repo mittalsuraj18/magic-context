@@ -2,6 +2,15 @@
 
 > All paths below are relative to `packages/plugin/` — the published npm package.
 
+## Key-files v6 locations
+
+- `packages/plugin/src/features/magic-context/key-files/project-key-files.ts` — project-scoped storage helpers, version helpers, orphan GC, hashing.
+- `packages/plugin/src/features/magic-context/key-files/read-history.ts` — primary-session read aggregation and range coalescing.
+- `packages/plugin/src/features/magic-context/key-files/identify-key-files.ts` — Dreamer prompt, validator, and atomic commit path.
+- `packages/plugin/src/features/magic-context/key-files/aft-availability.ts` — OpenCode/Pi AFT configuration detection.
+- `packages/plugin/src/hooks/magic-context/key-files-block.ts` — versioned injection cache and stale-update flushing shared by OpenCode and Pi.
+- `packages/dashboard/src/components/SessionViewer/SessionViewer.tsx` — read-only key-files panel in session detail.
+
 ## Directory Layout
 
 ```text
@@ -103,7 +112,7 @@
 - `src/hooks/magic-context/todo-view.ts`: Build the deterministic synthetic todowrite tool part and compute its hash-based `call_id`.
 - `src/features/magic-context/storage-db.ts`: Create durable storage; run versioned migrations; resolve runtime SQLite backend.
 - `src/features/magic-context/storage-meta-persisted.ts`: Read and write per-session persisted scalars and JSON blobs.
-- `src/features/magic-context/migrations.ts`: Versioned schema migrations v1–v11.
+- `src/features/magic-context/migrations.ts`: Versioned schema migrations v1–v13.
 - `src/features/magic-context/message-index.ts`: FTS-backed raw-message index for `ctx_search`.
 - `src/features/magic-context/search.ts`: Unified retrieval over memories, raw messages, and git commits.
 

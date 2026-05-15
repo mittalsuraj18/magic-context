@@ -1,12 +1,16 @@
 import {
     type ContextDatabase,
+    clearDeferredExecutePendingIfMatches,
+    clearPendingCompactionMarkerStateIf,
     clearPersistedStickyTurnReminder,
     clearPersistedTodoSyntheticAnchor,
+    getPendingCompactionMarkerState,
     getPendingOps,
     getPersistedStickyTurnReminder,
     getPersistedTodoSyntheticAnchor,
     getStrippedPlaceholderIds,
     getTopNBySize,
+    peekDeferredExecutePending,
     setPersistedStickyTurnReminder,
     setPersistedTodoSyntheticAnchor,
     setStrippedPlaceholderIds,
@@ -17,6 +21,7 @@ import { getErrorMessage } from "../../shared/error-message";
 import { sessionLog } from "../../shared/logger";
 import { applyContextNudge } from "./apply-context-nudge";
 import { runAutoSearchHint } from "./auto-search-runner";
+import { applyDeferredCompactionMarker } from "./compaction-marker-manager";
 import { getActiveCompartmentRun } from "./compartment-runner";
 import { dropStaleReduceCalls } from "./drop-stale-reduce-calls";
 import { applyHeuristicCleanup } from "./heuristic-cleanup";
@@ -60,6 +65,13 @@ import {
 } from "./transform-operations";
 import { logTransformTiming } from "./transform-stage-logger";
 
+const DEGRADE_CACHE_WARNING_THRESHOLD = 10;
+const degradedCacheCountBySession = new Map<string, number>();
+
+export function resetDegradedCacheCount(sessionId: string): void {
+    degradedCacheCountBySession.delete(sessionId);
+}
+
 interface RunPostTransformPhaseArgs {
     sessionId: string;
     db: ContextDatabase;
@@ -74,7 +86,13 @@ interface RunPostTransformPhaseArgs {
     fullFeatureMode: boolean;
     canRunCompartments: boolean;
     awaitedCompartmentRun: boolean;
+    phaseJustAwaitedPublication: boolean;
     compartmentInProgress: boolean;
+    historyRefreshExplicitBeforePrepare: boolean;
+    compartmentInjectionRebuiltFromDb: boolean;
+    rebuiltHistoryFromInitialPrepare: boolean;
+    historyRebuiltThisPass: boolean;
+    canConsumeDeferredLate: boolean;
     sessionMeta: SessionMeta;
     currentTurnId: string | null;
     /**
@@ -85,6 +103,8 @@ interface RunPostTransformPhaseArgs {
      * reason for the three-set split (see Oracle review 2026-04-26).
      */
     pendingMaterializationSessions: Set<string>;
+    deferredHistoryRefreshSessions: Set<string>;
+    deferredMaterializationSessions: Set<string>;
     lastHeuristicsTurnId: Map<string, string>;
     autoDropToolAge: number;
     dropToolStructure: boolean;
@@ -106,6 +126,7 @@ interface RunPostTransformPhaseArgs {
     forceMaterializationPercentage: number;
     hasRecentReduceCall: boolean;
     projectPath?: string;
+    sessionDirectory?: string;
     /** Experimental auto-search: when enabled, runs ctx_search on the latest
      *  user prompt and appends a compact fragment hint. */
     autoSearch?: {
@@ -134,13 +155,23 @@ interface RunPostTransformPhaseArgs {
     liveProviderID?: string;
 }
 
-export async function runPostTransformPhase(args: RunPostTransformPhaseArgs): Promise<void> {
+export interface PostTransformPhaseResult {
+    explicitMaterializedSuccessfully: boolean;
+    deferredMaterializedSuccessfully: boolean;
+}
+
+export async function runPostTransformPhase(
+    args: RunPostTransformPhaseArgs,
+): Promise<PostTransformPhaseResult> {
     let didMutateFromPendingOperations = false;
     // `isExplicitFlush` reads pendingMaterializationSessions — the persistent
     // "user wants pending ops + heuristics to run" signal. Survives across
     // blocked defer passes (compartmentRunning) so /ctx-flush intent is not
     // lost when historian races the user's command.
     const isExplicitFlush = args.pendingMaterializationSessions.has(args.sessionId);
+    const deferredMaterializationWasPending = args.deferredMaterializationSessions.has(
+        args.sessionId,
+    );
     const alreadyRanThisTurn =
         args.currentTurnId !== null &&
         args.lastHeuristicsTurnId.get(args.sessionId) === args.currentTurnId;
@@ -171,8 +202,10 @@ export async function runPostTransformPhase(args: RunPostTransformPhaseArgs): Pr
     // already-published compartments accumulate forever and context overflows.
     // At emergency levels we prioritize overflow prevention over cache stability.
     const emergencyBypassCompartmentGate = forceMaterialization;
+    const deferredMaterialize = args.canConsumeDeferredLate && deferredMaterializationWasPending;
+    const materializationRequested = isExplicitFlush || deferredMaterialize;
     const shouldReadPendingOps =
-        isExplicitFlush ||
+        materializationRequested ||
         args.schedulerDecision === "execute" ||
         forceMaterialization ||
         compartmentRunning;
@@ -184,7 +217,9 @@ export async function runPostTransformPhase(args: RunPostTransformPhaseArgs): Pr
     // cleanup would still fire (it gates on forceMaterialization directly),
     // causing unguarded cache busts while pending ops stop materializing.
     const shouldApplyPendingOps =
-        (args.schedulerDecision === "execute" || isExplicitFlush || forceMaterialization) &&
+        (args.schedulerDecision === "execute" ||
+            materializationRequested ||
+            forceMaterialization) &&
         (!compartmentRunning || emergencyBypassCompartmentGate);
     // Heuristic cleanup runs for ALL sessions — primary and subagent. Subagents
     // previously skipped heuristics entirely (via fullFeatureMode gate), which
@@ -212,7 +247,7 @@ export async function runPostTransformPhase(args: RunPostTransformPhaseArgs): Pr
     // approves for execution can fire heuristics.
     const shouldRunHeuristics =
         (!compartmentRunning || emergencyBypassCompartmentGate) &&
-        (isExplicitFlush ||
+        (materializationRequested ||
             forceMaterialization ||
             (args.schedulerDecision === "execute" &&
                 (!alreadyRanThisTurn || !args.fullFeatureMode)));
@@ -245,11 +280,13 @@ export async function runPostTransformPhase(args: RunPostTransformPhaseArgs): Pr
             !forceMaterialization;
         const reason = isExplicitFlush
             ? "explicit_flush"
-            : forceMaterialization
-              ? `force_materialization (${args.contextUsage.percentage.toFixed(1)}% >= ${args.forceMaterializationPercentage}%)`
-              : subagentRerun
-                ? `scheduler_execute_subagent_rerun (pendingOps=${pendingOps.length}, scheduler=${args.schedulerDecision})`
-                : `scheduler_execute (pendingOps=${pendingOps.length}, scheduler=${args.schedulerDecision})`;
+            : deferredMaterialize
+              ? "deferred_materialization"
+              : forceMaterialization
+                ? `force_materialization (${args.contextUsage.percentage.toFixed(1)}% >= ${args.forceMaterializationPercentage}%)`
+                : subagentRerun
+                  ? `scheduler_execute_subagent_rerun (pendingOps=${pendingOps.length}, scheduler=${args.schedulerDecision})`
+                  : `scheduler_execute (pendingOps=${pendingOps.length}, scheduler=${args.schedulerDecision})`;
         sessionLog(
             args.sessionId,
             `heuristics WILL RUN — reason=${reason}, context=${args.contextUsage.percentage.toFixed(1)}%, turn=${args.currentTurnId}`,
@@ -260,7 +297,7 @@ export async function runPostTransformPhase(args: RunPostTransformPhaseArgs): Pr
     if (
         alreadyRanThisTurn &&
         args.schedulerDecision === "execute" &&
-        !isExplicitFlush &&
+        !materializationRequested &&
         args.fullFeatureMode
     ) {
         sessionLog(
@@ -281,11 +318,17 @@ export async function runPostTransformPhase(args: RunPostTransformPhaseArgs): Pr
             );
         }
     }
+    let explicitMaterializedSuccessfully = false;
+    let deferredMaterializedSuccessfully = false;
+    let heuristicsRanSuccessfully = false;
+    let pendingOpsRanSuccessfully = false;
     try {
         if (shouldApplyPendingOps) {
             const applyReason = isExplicitFlush
                 ? "explicit_flush"
-                : `scheduler_execute (scheduler=${args.schedulerDecision})`;
+                : deferredMaterialize
+                  ? "deferred_materialization"
+                  : `scheduler_execute (scheduler=${args.schedulerDecision})`;
             sessionLog(
                 args.sessionId,
                 `pending ops WILL APPLY — reason=${applyReason}, pendingOps=${pendingOps.length}, context=${args.contextUsage.percentage.toFixed(1)}%`,
@@ -417,13 +460,21 @@ export async function runPostTransformPhase(args: RunPostTransformPhaseArgs): Pr
         }
         // After a TTL-based scheduler execute, reset lastResponseTime so
         // subsequent transforms defer instead of re-executing every pass.
-        if (args.schedulerDecision === "execute" && !isExplicitFlush) {
+        if (args.schedulerDecision === "execute" && !materializationRequested) {
             updateSessionMeta(args.db, args.sessionId, { lastResponseTime: Date.now() });
         }
         args.batch?.finalize();
         logTransformTiming(args.sessionId, "batchFinalize:heuristics", performance.now());
         if (args.sessionMeta.lastTransformError !== null) {
             updateSessionMeta(args.db, args.sessionId, { lastTransformError: null });
+        }
+        if (shouldRunHeuristics) {
+            if (isExplicitFlush) explicitMaterializedSuccessfully = true;
+            if (deferredMaterialize) deferredMaterializedSuccessfully = true;
+            heuristicsRanSuccessfully = true;
+        }
+        if (shouldApplyPendingOps) {
+            pendingOpsRanSuccessfully = true;
         }
     } catch (error) {
         sessionLog(args.sessionId, "transform failed applying pending operations:", error);
@@ -822,6 +873,107 @@ export async function runPostTransformPhase(args: RunPostTransformPhaseArgs): Pr
     // running embedding on subagent input wastes cycles + saturates the
     // embedding endpoint when many subagents run in parallel (e.g. Athena
     // council).
+    const explicitRebuildHappened =
+        args.historyRefreshExplicitBeforePrepare && args.rebuiltHistoryFromInitialPrepare;
+    const materializationSatisfied =
+        !deferredMaterializationWasPending ||
+        explicitMaterializedSuccessfully ||
+        deferredMaterializedSuccessfully;
+    const historyWasConsumedThisPass =
+        args.historyRebuiltThisPass &&
+        (args.canConsumeDeferredLate ||
+            args.phaseJustAwaitedPublication ||
+            explicitRebuildHappened) &&
+        materializationSatisfied;
+
+    // Plan v6 §3 degraded-cache counter: track consecutive null-boundary
+    // rebuilds. Independent of the drain logic below.
+    if (args.compartmentInjectionRebuiltFromDb && args.pendingCompartmentInjection) {
+        if (args.pendingCompartmentInjection.compartmentEndMessageId === null) {
+            const nextCount = (degradedCacheCountBySession.get(args.sessionId) ?? 0) + 1;
+            degradedCacheCountBySession.set(args.sessionId, nextCount);
+            if (nextCount === DEGRADE_CACHE_WARNING_THRESHOLD) {
+                sessionLog(
+                    args.sessionId,
+                    `WARNING: compartment injection cache has rebuilt with a degraded null boundary ${nextCount} consecutive times; investigate missing boundary messages`,
+                );
+            }
+        } else {
+            degradedCacheCountBySession.delete(args.sessionId);
+        }
+    }
+
+    // Plan v6 §3 deferred-marker drain. Runs when v12's
+    // `historyWasConsumedThisPass` is true AND we hold the deferred-history
+    // signal AND a pending marker blob exists. The blob is the in-tx record
+    // written by the incremental runner at publication time (plan v6 §4); the
+    // drain finally applies the marker movement to OpenCode's DB.
+    //
+    // The v12 drain of `deferredHistoryRefreshSessions` still fires below — we
+    // only conditionally suppress it when the marker apply returned
+    // `retryable-failure`, so the next consuming pass retries.
+    let suppressV12HistoryDrain = false;
+    if (historyWasConsumedThisPass && args.deferredHistoryRefreshSessions.has(args.sessionId)) {
+        const pending = getPendingCompactionMarkerState(args.db, args.sessionId);
+        if (pending) {
+            const outcome = applyDeferredCompactionMarker(
+                args.db,
+                args.sessionId,
+                pending,
+                args.sessionDirectory,
+            );
+            switch (outcome.kind) {
+                case "applied":
+                case "already-current":
+                case "stale-skip":
+                    clearPendingCompactionMarkerStateIf(args.db, args.sessionId, pending);
+                    // v12 drain proceeds normally below.
+                    break;
+                case "retryable-failure":
+                    sessionLog(
+                        args.sessionId,
+                        "compaction-marker drain: retryable failure; preserving deferred history refresh signal",
+                        outcome.error,
+                    );
+                    suppressV12HistoryDrain = true;
+                    break;
+            }
+        }
+    }
+
+    const deferredHistoryDrainEligible = historyWasConsumedThisPass && !suppressV12HistoryDrain;
+    if (deferredHistoryDrainEligible) {
+        args.deferredHistoryRefreshSessions.delete(args.sessionId);
+    }
+    if (explicitMaterializedSuccessfully || deferredMaterializedSuccessfully) {
+        args.deferredMaterializationSessions.delete(args.sessionId);
+    }
+
+    const workExecutedSuccessfully =
+        explicitMaterializedSuccessfully ||
+        deferredMaterializedSuccessfully ||
+        heuristicsRanSuccessfully ||
+        pendingOpsRanSuccessfully;
+
+    if (workExecutedSuccessfully) {
+        try {
+            const currentFlag = peekDeferredExecutePending(args.db, args.sessionId);
+            if (currentFlag !== null) {
+                const cleared = clearDeferredExecutePendingIfMatches(
+                    args.db,
+                    args.sessionId,
+                    currentFlag,
+                );
+                sessionLog(
+                    args.sessionId,
+                    `[boundary-exec] deferred-execute drain: ${cleared ? "cleared" : "stale-noop"} reason=${currentFlag.reason}`,
+                );
+            }
+        } catch (err) {
+            sessionLog(args.sessionId, `[boundary-exec] drain failed (continuing): ${err}`);
+        }
+    }
+
     if (args.fullFeatureMode && args.autoSearch?.enabled && args.projectPath) {
         // Resolve memory ids currently rendered in the <session-history>
         // block. The auto-search runner drops hint fragments for memories the
@@ -849,4 +1001,6 @@ export async function runPostTransformPhase(args: RunPostTransformPhaseArgs): Pr
             sessionLog(args.sessionId, "auto-search runner failed:", error);
         }
     }
+
+    return { explicitMaterializedSuccessfully, deferredMaterializedSuccessfully };
 }

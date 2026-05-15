@@ -689,7 +689,7 @@ export function buildArgs(options: SubagentRunOptions): string[] {
  * Extract the final assistant message's text + status from a Pi `agent_end`
  * messages array.
  *
- * Pi's AgentMessage shape (from @mariozechner/pi-ai):
+ * Pi's AgentMessage shape (from @oh-my-pi/pi-ai):
  *   {
  *     role: "user" | "assistant" | "toolResult",
  *     content: Array<{ type: "text" | "toolCall" | "toolResult", ... }>,

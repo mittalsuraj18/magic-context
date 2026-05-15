@@ -9,7 +9,11 @@ import { clearCompressionDepth } from "../../features/magic-context/compression-
 import { promoteSessionFactsToMemory } from "../../features/magic-context/memory";
 import { resolveProjectIdentity } from "../../features/magic-context/memory/project-identity";
 import { getMemoriesByProject } from "../../features/magic-context/memory/storage-memory";
-import { updateSessionMeta } from "../../features/magic-context/storage-meta";
+import {
+    clearPendingCompactionMarkerStateIf,
+    getPendingCompactionMarkerState,
+    updateSessionMeta,
+} from "../../features/magic-context/storage-meta";
 import { normalizeSDKResponse } from "../../shared";
 import { getErrorMessage } from "../../shared/error-message";
 import { updateCompactionMarkerAfterPublication } from "./compaction-marker-manager";
@@ -117,11 +121,10 @@ export async function executeContextRecompInternal(deps: CompartmentRunnerDeps):
             // 0, matching what partial recomp does for its rebuilt range.
             clearCompressionDepth(db, sessionId);
 
-            // Invalidate injection cache after recomp promotion
-            clearInjectionCache(sessionId);
-            // Signal the caller that the next transform MUST treat itself as
-            // cache-busting. See council Finding #9.
-            deps.onInjectionCacheCleared?.(sessionId);
+            if (deps.preserveInjectionCacheUntilConsumed !== true) {
+                clearInjectionCache(sessionId);
+            }
+            deps.onCompartmentStatePublished?.(sessionId);
 
             // Issue #44: respect memory.enabled and memory.auto_promote.
             if (deps.directory && deps.memoryEnabled !== false && deps.autoPromote !== false) {
@@ -139,7 +142,11 @@ export async function executeContextRecompInternal(deps: CompartmentRunnerDeps):
                 queueDropsForCompartmentalizedMessages(db, sessionId, lastCompartmentEnd);
             }
 
-            // Update compaction marker after recomp if experimental flag is enabled
+            // Update compaction marker after recomp if experimental flag is enabled.
+            // Recomp is explicit (eagerly clears injection cache), so the marker
+            // applies directly here. Plan v6 §6: also CAS-clear any stale pending
+            // marker that a prior in-flight incremental publish may have left
+            // behind — recomp now owns the boundary.
             if (deps.experimentalCompactionMarkers && lastCompartmentEnd > 0) {
                 updateCompactionMarkerAfterPublication(
                     db,
@@ -147,6 +154,10 @@ export async function executeContextRecompInternal(deps: CompartmentRunnerDeps):
                     lastCompartmentEnd,
                     deps.directory,
                 );
+                const stalePending = getPendingCompactionMarkerState(db, sessionId);
+                if (stalePending) {
+                    clearPendingCompactionMarkerStateIf(db, sessionId, stalePending);
+                }
             }
 
             return [
@@ -193,9 +204,16 @@ export async function executeContextRecompInternal(deps: CompartmentRunnerDeps):
                       ? `${memoryBlock}\n\nThis is your first run. No existing compartments or facts.`
                       : "This is your first run. No existing state.";
 
-            // Clean up previous pass's state file before writing the new one
+            // Clean up previous pass's state file before writing the new one.
+            // State file lives under <project>/.opencode/magic-context/historian/
+            // so historian's Read tool doesn't trigger OpenCode's
+            // external_directory permission prompt.
             cleanupHistorianStateFile(currentStateFilePath);
-            currentStateFilePath = maybeWriteHistorianStateFile(sessionId, existingState);
+            currentStateFilePath = maybeWriteHistorianStateFile(
+                sessionId,
+                existingState,
+                sessionDirectory,
+            );
 
             const prompt = buildCompartmentAgentPrompt(
                 existingState,
@@ -311,11 +329,10 @@ export async function executeContextRecompInternal(deps: CompartmentRunnerDeps):
         // Full recomp rebuilds every compartment, so all pre-existing depth
         // rows are stale. Matches partial recomp's behavior for rebuilt ranges.
         clearCompressionDepth(db, sessionId);
-        // Invalidate injection cache after final recomp promotion
-        clearInjectionCache(sessionId);
-        // Signal the caller that the next transform MUST treat itself as
-        // cache-busting. See council Finding #9.
-        deps.onInjectionCacheCleared?.(sessionId);
+        if (deps.preserveInjectionCacheUntilConsumed !== true) {
+            clearInjectionCache(sessionId);
+        }
+        deps.onCompartmentStatePublished?.(sessionId);
 
         const finalCompartments = promoted?.compartments ?? candidateCompartments;
         const finalFacts = promoted?.facts ?? candidateFacts;

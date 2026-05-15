@@ -2,10 +2,7 @@ import { enqueueDream } from "@magic-context/core/features/magic-context/dreamer
 import type { ContextDatabase } from "@magic-context/core/features/magic-context/storage";
 import { sessionLog } from "@magic-context/core/shared/logger";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import {
-	isPiDreamerProjectRegistered,
-	runPiDreamForProject,
-} from "../dreamer";
+import { isPiDreamerProjectRegistered, runPiDreamForProject } from "../dreamer";
 import { sendCtxStatusMessage } from "./pi-command-utils";
 
 export function registerCtxDreamCommand(

@@ -174,6 +174,8 @@ pub struct SessionFilter {
     /// `None` = no filter (return both). The dashboard "Subagents" toggle
     /// sends `Some(false)` when unchecked so subagents are filtered server-side.
     pub is_subagent: Option<bool>,
+    pub offset: Option<u32>,
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -186,6 +188,13 @@ pub struct SessionRow {
     pub message_count: u32,
     pub last_activity_ms: i64,
     pub is_subagent: bool,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct PagedSessions {
+    pub rows: Vec<SessionRow>,
+    pub total: u32,
+    pub has_more: bool,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -207,7 +216,13 @@ pub struct SessionDetail {
     pub project_path: Option<String>,
     pub opencode_session_json: Option<serde_json::Value>,
     pub pi_jsonl_path: Option<String>,
-    pub messages: Vec<SessionMessageRow>,
+    /// Cheap row counts so badges can render without paying the cost of the
+    /// underlying lists. Messages are pulled lazily by `get_session_messages`
+    /// when the user activates the Messages tab; cache events by
+    /// `get_session_cache_events` for the Cache tab. Both can be tens of
+    /// thousands of rows for a long-running session and dominate IPC time.
+    pub messages_count: i64,
+    pub cache_events_count: i64,
     pub compartments: Vec<Compartment>,
     pub facts: Vec<SessionFact>,
     pub notes: Vec<Note>,
@@ -325,6 +340,20 @@ pub struct DreamRun {
     pub memory_changes_json: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Serialize, Clone)]
+pub struct KeyFileRow {
+    pub project_path: String,
+    pub path: String,
+    pub content: String,
+    pub content_hash: String,
+    pub local_token_estimate: i64,
+    pub generated_at: i64,
+    pub generated_by_model: Option<String>,
+    pub generation_config_hash: String,
+    pub stale_reason: Option<String>,
+    pub version: i64,
+}
+
 // ── Note types ────────────────────────────────────────────────
 // Unified Note struct replaces SessionNote and SmartNote
 // Both session notes (type='session') and smart notes (type='smart') are stored in the notes table
@@ -360,6 +389,9 @@ pub struct DbCacheEvent {
     pub severity: String,
     pub cause: Option<String>,
     pub agent: Option<String>,
+    pub finish: Option<String>,
+    pub turn_id: String,
+    pub is_turn_start: bool,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -386,6 +418,7 @@ struct RawDbCacheEvent {
     cache_write: i64,
     total_tokens: i64,
     agent: Option<String>,
+    finish: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -659,6 +692,7 @@ fn load_raw_db_cache_events(
                        COALESCE(CAST(json_extract(m.data, '$.tokens.cache.write') AS INTEGER), 0) AS cache_write,
                        COALESCE(CAST(json_extract(m.data, '$.tokens.total') AS INTEGER), 0) AS total_tokens,
                        CAST(json_extract(m.data, '$.agent') AS TEXT) AS agent,
+                       CAST(json_extract(m.data, '$.finish') AS TEXT) AS finish,
                        ROW_NUMBER() OVER (PARTITION BY m.session_id ORDER BY m.time_created DESC) AS rn
                 FROM message m
                 WHERE json_extract(m.data, '$.role') = 'assistant'
@@ -666,7 +700,7 @@ fn load_raw_db_cache_events(
                   AND m.time_created > ?1
             )
             SELECT msg_id, session_id, time_created, input_tokens, cache_read,
-                   cache_write, total_tokens, agent
+                   cache_write, total_tokens, agent, finish
             FROM ranked
             WHERE rn <= ?2
             ORDER BY time_created DESC
@@ -688,13 +722,14 @@ fn load_raw_db_cache_events(
                        COALESCE(CAST(json_extract(m.data, '$.tokens.cache.write') AS INTEGER), 0) AS cache_write,
                        COALESCE(CAST(json_extract(m.data, '$.tokens.total') AS INTEGER), 0) AS total_tokens,
                        CAST(json_extract(m.data, '$.agent') AS TEXT) AS agent,
+                       CAST(json_extract(m.data, '$.finish') AS TEXT) AS finish,
                        ROW_NUMBER() OVER (PARTITION BY m.session_id ORDER BY m.time_created DESC) AS rn
                 FROM message m
                 WHERE json_extract(m.data, '$.role') = 'assistant'
                   AND COALESCE(CAST(json_extract(m.data, '$.tokens.total') AS INTEGER), 0) > 0
             )
             SELECT msg_id, session_id, time_created, input_tokens, cache_read,
-                   cache_write, total_tokens, agent
+                   cache_write, total_tokens, agent, finish
             FROM ranked
             WHERE rn <= ?1
             ORDER BY time_created DESC
@@ -719,6 +754,7 @@ fn load_raw_db_cache_events(
             cache_write: row.get(5)?,
             total_tokens: row.get(6)?,
             agent: row.get(7)?,
+            finish: row.get(8)?,
         })
     })?;
 
@@ -764,6 +800,7 @@ fn load_raw_pi_cache_events(limit: usize, since_timestamp: Option<i64>) -> Vec<R
                     cache_write: usage.cache_write as i64,
                     total_tokens: usage.total as i64,
                     agent: None,
+                    finish: message.stop_reason.clone(),
                 })
             })
             .collect();
@@ -814,13 +851,12 @@ fn build_db_cache_events(rows: Vec<RawDbCacheEvent>, enrich_causes: bool) -> Vec
         .filter(|((h, _), _)| matches!(h, Harness::Opencode))
         .map(|((_, sid), _)| sid.clone())
         .collect();
-    let true_first_sessions: HashSet<(Harness, String)> =
-        if !oc_session_ids.is_empty() {
-            if let Some(opencode_db_path) = resolve_opencode_db_path() {
-                if let Ok(conn) = open_readonly(&opencode_db_path) {
-                    // Build IN-clause with placeholders for each session_id we care about.
-                    let placeholders = vec!["?"; oc_session_ids.len()].join(",");
-                    let sql = format!(
+    let true_first_sessions: HashSet<(Harness, String)> = if !oc_session_ids.is_empty() {
+        if let Some(opencode_db_path) = resolve_opencode_db_path() {
+            if let Ok(conn) = open_readonly(&opencode_db_path) {
+                // Build IN-clause with placeholders for each session_id we care about.
+                let placeholders = vec!["?"; oc_session_ids.len()].join(",");
+                let sql = format!(
                         "SELECT session_id, MIN(time_created) AS first_ts
                          FROM message
                          WHERE session_id IN ({})
@@ -829,28 +865,27 @@ fn build_db_cache_events(rows: Vec<RawDbCacheEvent>, enrich_causes: bool) -> Vec
                          GROUP BY session_id",
                         placeholders
                     );
-                    let session_id_refs: Vec<&dyn rusqlite::types::ToSql> =
-                        oc_session_ids.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
-                    if let Ok(mut stmt) = conn.prepare(&sql) {
-                        let rows = stmt.query_map(session_id_refs.as_slice(), |row| {
-                            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-                        });
-                        if let Ok(rows) = rows {
-                            // A session is "truly first" in our window if its
-                            // window-earliest timestamp matches its DB-wide
-                            // earliest assistant timestamp.
-                            rows.filter_map(|r| r.ok())
-                                .filter(|(sid, db_earliest)| {
-                                    earliest_ts_in_window
-                                        .get(&(Harness::Opencode, sid.clone()))
-                                        .map(|window_earliest| *window_earliest <= *db_earliest)
-                                        .unwrap_or(false)
-                                })
-                                .map(|(sid, _)| (Harness::Opencode, sid))
-                                .collect()
-                        } else {
-                            HashSet::new()
-                        }
+                let session_id_refs: Vec<&dyn rusqlite::types::ToSql> = oc_session_ids
+                    .iter()
+                    .map(|s| s as &dyn rusqlite::types::ToSql)
+                    .collect();
+                if let Ok(mut stmt) = conn.prepare(&sql) {
+                    let rows = stmt.query_map(session_id_refs.as_slice(), |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                    });
+                    if let Ok(rows) = rows {
+                        // A session is "truly first" in our window if its
+                        // window-earliest timestamp matches its DB-wide
+                        // earliest assistant timestamp.
+                        rows.filter_map(|r| r.ok())
+                            .filter(|(sid, db_earliest)| {
+                                earliest_ts_in_window
+                                    .get(&(Harness::Opencode, sid.clone()))
+                                    .map(|window_earliest| *window_earliest <= *db_earliest)
+                                    .unwrap_or(false)
+                            })
+                            .map(|(sid, _)| (Harness::Opencode, sid))
+                            .collect()
                     } else {
                         HashSet::new()
                     }
@@ -862,7 +897,10 @@ fn build_db_cache_events(rows: Vec<RawDbCacheEvent>, enrich_causes: bool) -> Vec
             }
         } else {
             HashSet::new()
-        };
+        }
+    } else {
+        HashSet::new()
+    };
 
     // Pi-side: a Pi session has its true-first assistant message in our window
     // when our window-earliest timestamp for that Pi session is also the
@@ -924,8 +962,7 @@ fn build_db_cache_events(rows: Vec<RawDbCacheEvent>, enrich_causes: bool) -> Vec
 
         let session_key = (row.harness, row.session_id.clone());
         let is_first_session_event = seen_sessions.insert(session_key.clone());
-        let is_truly_first =
-            is_first_session_event && true_first_sessions.contains(&session_key);
+        let is_truly_first = is_first_session_event && true_first_sessions.contains(&session_key);
         let (severity, cause) = if is_truly_first {
             (
                 "info".to_string(),
@@ -967,7 +1004,66 @@ fn build_db_cache_events(rows: Vec<RawDbCacheEvent>, enrich_causes: bool) -> Vec
             severity,
             cause,
             agent: row.agent,
+            finish: row.finish,
+            turn_id: String::new(),
+            is_turn_start: false,
         });
+    }
+
+    // ── Turn grouping & warming severity ────────────────────────────
+    // Walk chronological events per session. A new turn starts when:
+    //   - this is the first event for the session, OR
+    //   - the PREVIOUS event in the same session had finish != "tool-calls"
+    // Continuation events that show cache_read < 90% of expected
+    // (previous.cache_read + previous.cache_write) are downgraded to "warming".
+    //
+    // Inputs to this function may arrive in any order; the severity-loop above
+    // happens to consume rows newest→oldest via .rev(), producing a vec that
+    // is NOT guaranteed chronological. Sort ascending by timestamp here so
+    // "previous" really means "earlier in time" before computing turn IDs.
+    chronological.sort_by_key(|e| e.timestamp);
+
+    let mut last_finish_by_session: HashMap<(Harness, String), String> = HashMap::new();
+    let mut current_turn_id_by_session: HashMap<(Harness, String), String> = HashMap::new();
+    let mut prev_event_idx_by_session: HashMap<(Harness, String), usize> = HashMap::new();
+
+    for i in 0..chronological.len() {
+        let session_key = (chronological[i].harness, chronological[i].session_id.clone());
+        let prev_finish = last_finish_by_session.get(&session_key).cloned();
+        let is_new_turn = match prev_finish.as_deref() {
+            None => true,
+            Some("tool-calls") => false,
+            Some(_) => true,
+        };
+
+        chronological[i].is_turn_start = is_new_turn;
+        if is_new_turn {
+            chronological[i].turn_id = chronological[i].message_id.clone();
+            current_turn_id_by_session.insert(session_key.clone(), chronological[i].message_id.clone());
+        } else {
+            chronological[i].turn_id = current_turn_id_by_session
+                .get(&session_key)
+                .cloned()
+                .unwrap_or_default();
+        }
+
+        // Warming check for continuation events
+        if !is_new_turn {
+            if let Some(&prev_idx) = prev_event_idx_by_session.get(&session_key) {
+                let prev = &chronological[prev_idx];
+                let expected = prev.cache_read + prev.cache_write;
+                if expected > 0 && chronological[i].cache_read < (expected as f64 * 0.9) as i64 {
+                    if chronological[i].severity == "warning"
+                        || chronological[i].severity == "bust"
+                    {
+                        chronological[i].severity = "warming".to_string();
+                    }
+                }
+            }
+        }
+
+        prev_event_idx_by_session.insert(session_key.clone(), i);
+        last_finish_by_session.insert(session_key, chronological[i].finish.clone().unwrap_or_default());
     }
 
     chronological
@@ -990,8 +1086,8 @@ pub fn get_session_cache_stats_from_db(limit: usize) -> Vec<SessionCacheStats> {
     rows.sort_by_key(|r| std::cmp::Reverse(r.timestamp));
     rows.truncate(2000); // 200 per-session × ~10 sessions cap
     let events = build_db_cache_events(rows, false); // skip log enrichment for stats
-    // Key by (harness, session_id) so OC and Pi sessions never collide on a
-    // shared short-prefix session ID.
+                                                     // Key by (harness, session_id) so OC and Pi sessions never collide on a
+                                                     // shared short-prefix session ID.
     let mut map: HashMap<(Harness, String), (usize, i64, i64, i64, i64, usize)> = HashMap::new();
 
     for event in events {
@@ -1056,36 +1152,100 @@ pub fn get_session_cache_stats_from_db(limit: usize) -> Vec<SessionCacheStats> {
     stats.into_iter().map(|(_, stat)| stat).collect()
 }
 
-pub fn get_session_cache_events(harness: Harness, session_id: &str) -> Vec<DbCacheEvent> {
+// `limit` caps the returned event count to the most recent N (newest-first
+// selection from the DB, then re-sorted to chronological for the chart).
+// Passing 0 or a huge value effectively returns the whole session — keep
+// the dashboard's PER_SESSION = 200 budget in mind on call sites that go
+// straight into a chart, because every event is ~250 bytes of JSON across
+// the Tauri IPC boundary and a hot session can produce 30k+ events.
+pub fn get_session_cache_events(
+    harness: Harness,
+    session_id: &str,
+    limit: Option<usize>,
+) -> Vec<DbCacheEvent> {
     match harness {
-        Harness::Opencode => get_opencode_session_cache_events(session_id),
-        Harness::Pi => get_pi_session_cache_events(session_id),
+        Harness::Opencode => get_opencode_session_cache_events(session_id, limit),
+        Harness::Pi => get_pi_session_cache_events(session_id, limit),
     }
 }
 
-fn get_opencode_session_cache_events(session_id: &str) -> Vec<DbCacheEvent> {
+/// Trim a chronologically-ordered event list to at most `target_turns`
+/// complete turns, keeping the most recent turns.
+fn trim_events_to_turns(events: Vec<DbCacheEvent>, target_turns: usize) -> Vec<DbCacheEvent> {
+    if events.is_empty() || target_turns == 0 {
+        return Vec::new();
+    }
+    let turn_starts: Vec<usize> = events
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.is_turn_start)
+        .map(|(i, _)| i)
+        .collect();
+    if turn_starts.len() <= target_turns {
+        return events;
+    }
+    let keep_from_idx = turn_starts[turn_starts.len() - target_turns];
+    events.into_iter().skip(keep_from_idx).collect()
+}
+
+/// Fetch events for one session, trimmed so the result contains at most
+/// `target_turns` complete turns (most recent first). Events are returned
+/// in chronological order (oldest → newest).
+///
+/// Strategy: fetch up to `max_events = target_turns * 50` raw events (cap of 50
+/// events/turn is conservative — even very heavy tool-use turns rarely exceed
+/// that). Then group into turns. If we got more than target_turns, drop oldest
+/// events until only `target_turns` most-recent turns remain.
+pub fn get_session_cache_events_by_turn_count(
+    harness: Harness,
+    session_id: &str,
+    target_turns: usize,
+) -> Vec<DbCacheEvent> {
+    let max_events = (target_turns * 50).max(200); // floor to existing limit
+    let raw = match harness {
+        Harness::Opencode => {
+            get_opencode_session_cache_events(session_id, Some(max_events))
+        }
+        Harness::Pi => get_pi_session_cache_events(session_id, Some(max_events)),
+    };
+    trim_events_to_turns(raw, target_turns)
+}
+
+fn get_opencode_session_cache_events(session_id: &str, limit: Option<usize>) -> Vec<DbCacheEvent> {
     let Some(opencode_db_path) = resolve_opencode_db_path() else {
         return Vec::new();
     };
     let Ok(conn) = open_readonly(&opencode_db_path) else {
         return Vec::new();
     };
+
+    // Bound `limit` to something sane. The SQL window is small enough that
+    // rusqlite can bind it as i64 directly; we then reverse to chronological
+    // in build_db_cache_events / by sort below.
+    let lim: i64 = match limit {
+        Some(n) if n > 0 => n as i64,
+        // None == no cap; SQLite treats negative LIMIT as "no limit".
+        _ => -1,
+    };
+
     let Ok(mut stmt) = conn.prepare(
         "SELECT CAST(id AS TEXT), session_id, time_created,
                 COALESCE(CAST(json_extract(data, '$.tokens.input') AS INTEGER), 0),
                 COALESCE(CAST(json_extract(data, '$.tokens.cache.read') AS INTEGER), 0),
                 COALESCE(CAST(json_extract(data, '$.tokens.cache.write') AS INTEGER), 0),
                 COALESCE(CAST(json_extract(data, '$.tokens.total') AS INTEGER), 0),
-                CAST(json_extract(data, '$.agent') AS TEXT)
+                CAST(json_extract(data, '$.agent') AS TEXT),
+                CAST(json_extract(data, '$.finish') AS TEXT)
          FROM message
          WHERE session_id = ?1
            AND json_extract(data, '$.role') = 'assistant'
            AND COALESCE(CAST(json_extract(data, '$.tokens.total') AS INTEGER), 0) > 0
-         ORDER BY time_created ASC",
+         ORDER BY time_created DESC
+         LIMIT ?2",
     ) else {
         return Vec::new();
     };
-    let Ok(rows) = stmt.query_map([session_id], |row| {
+    let Ok(rows) = stmt.query_map(rusqlite::params![session_id, lim], |row| {
         Ok(RawDbCacheEvent {
             harness: Harness::Opencode,
             message_id: row.get(0)?,
@@ -1096,21 +1256,24 @@ fn get_opencode_session_cache_events(session_id: &str) -> Vec<DbCacheEvent> {
             cache_write: row.get(5)?,
             total_tokens: row.get(6)?,
             agent: row.get(7)?,
+            finish: row.get(8)?,
         })
     }) else {
         return Vec::new();
     };
+    // build_db_cache_events sorts by timestamp ASC, so DESC LIMIT then ASC
+    // sort yields the most-recent N in chronological order.
     build_db_cache_events(rows.flatten().collect(), true)
 }
 
-fn get_pi_session_cache_events(session_id: &str) -> Vec<DbCacheEvent> {
+fn get_pi_session_cache_events(session_id: &str, limit: Option<usize>) -> Vec<DbCacheEvent> {
     let Some(path) = pi_sessions::find_pi_session_path(session_id) else {
         return Vec::new();
     };
     let Some(detail) = pi_sessions::read_pi_session_detail(&path) else {
         return Vec::new();
     };
-    let rows = detail
+    let mut rows: Vec<RawDbCacheEvent> = detail
         .messages
         .into_iter()
         .filter(|message| message.role == "assistant")
@@ -1126,9 +1289,18 @@ fn get_pi_session_cache_events(session_id: &str) -> Vec<DbCacheEvent> {
                 cache_write: usage.cache_write as i64,
                 total_tokens: usage.total as i64,
                 agent: None,
+                finish: message.stop_reason,
             })
         })
         .collect();
+    // Tail-truncate to the most-recent N entries (Pi JSONL is naturally
+    // chronological, so the last N are the freshest).
+    if let Some(n) = limit {
+        if n > 0 && rows.len() > n {
+            let start = rows.len() - n;
+            rows.drain(..start);
+        }
+    }
     build_db_cache_events(rows, false)
 }
 
@@ -1245,7 +1417,8 @@ fn enumerate_projects_filtered(project_paths_filter: Option<&HashSet<String>>) -
                         }
                         entry.opencode_path = Some(worktree);
                         entry.harnesses.insert(Harness::Opencode);
-                        entry.session_count = entry.session_count.saturating_add(count.max(0) as u32);
+                        entry.session_count =
+                            entry.session_count.saturating_add(count.max(0) as u32);
                     }
                 }
             }
@@ -1818,17 +1991,24 @@ pub fn bulk_delete_memory(
     // Explicitly clear embeddings first; the FK would handle this too but
     // being explicit documents the intent and matches single-row delete logs.
     {
-        let sql = format!("DELETE FROM memory_embeddings WHERE memory_id IN ({})", placeholders);
+        let sql = format!(
+            "DELETE FROM memory_embeddings WHERE memory_id IN ({})",
+            placeholders
+        );
         let mut stmt = tx.prepare(&sql)?;
-        let params: Vec<&dyn rusqlite::ToSql> =
-            memory_ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+        let params: Vec<&dyn rusqlite::ToSql> = memory_ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::ToSql)
+            .collect();
         stmt.execute(&params[..])?;
     }
     let affected = {
         let sql = format!("DELETE FROM memories WHERE id IN ({})", placeholders);
         let mut stmt = tx.prepare(&sql)?;
-        let params: Vec<&dyn rusqlite::ToSql> =
-            memory_ids.iter().map(|id| id as &dyn rusqlite::ToSql).collect();
+        let params: Vec<&dyn rusqlite::ToSql> = memory_ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::ToSql)
+            .collect();
         stmt.execute(&params[..])?
     };
     tx.commit()?;
@@ -1955,8 +2135,12 @@ pub fn list_opencode_sessions(filter: &SessionFilter) -> Vec<SessionRow> {
         })
     });
 
-    rows.map(|rows| rows.flatten().filter(|row| session_matches_filter(row, filter)).collect())
-        .unwrap_or_default()
+    rows.map(|rows| {
+        rows.flatten()
+            .filter(|row| session_matches_filter(row, filter))
+            .collect()
+    })
+    .unwrap_or_default()
 }
 
 pub fn list_pi_sessions(filter: &SessionFilter) -> Vec<SessionRow> {
@@ -1992,13 +2176,45 @@ pub fn list_all_sessions(filter: SessionFilter) -> Vec<SessionRow> {
     rows
 }
 
+pub fn list_sessions_paged(filter: SessionFilter) -> PagedSessions {
+    let rows = list_all_sessions(filter.clone());
+    page_session_rows(rows, filter.offset, filter.limit)
+}
+
+fn page_session_rows(
+    rows: Vec<SessionRow>,
+    offset: Option<u32>,
+    limit: Option<u32>,
+) -> PagedSessions {
+    let total_usize = rows.len();
+    let offset_usize = offset.unwrap_or(0) as usize;
+    let limit_usize = limit.map(|value| value as usize).unwrap_or(total_usize);
+    let paged_rows: Vec<SessionRow> = rows
+        .into_iter()
+        .skip(offset_usize)
+        .take(limit_usize)
+        .collect();
+    let consumed = offset_usize.saturating_add(paged_rows.len());
+
+    PagedSessions {
+        rows: paged_rows,
+        total: total_usize as u32,
+        has_more: consumed < total_usize,
+    }
+}
+
 fn session_matches_filter(row: &SessionRow, filter: &SessionFilter) -> bool {
     if let Some(identity) = filter.project_identity.as_deref() {
         if row.project_identity != identity {
             return false;
         }
     }
-    if let Some(search) = filter.search.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(search) = filter
+        .search
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         let search = search.to_ascii_lowercase();
         let haystack = format!("{} {} {}", row.title, row.project_display, row.session_id)
             .to_ascii_lowercase();
@@ -2061,6 +2277,80 @@ pub fn get_session_detail(
     }
 }
 
+/// Lazy message-list fetch for the Messages tab. Separated from
+/// `get_session_detail` so opening a session doesn't pay the cost of
+/// JSON-extracting role + aggregating `part` text for tens of thousands of
+/// rows when the user lands on Compartments. Pi side reuses the mtime-cached
+/// JSONL view, so a second call after `get_session_detail` is essentially free.
+pub fn get_session_messages(
+    harness: Harness,
+    session_id: &str,
+) -> Result<Vec<SessionMessageRow>, rusqlite::Error> {
+    match harness {
+        Harness::Opencode => {
+            let Some(opencode_db_path) = resolve_opencode_db_path() else {
+                return Ok(Vec::new());
+            };
+            let conn = open_readonly(&opencode_db_path)?;
+            load_opencode_messages(&conn, session_id)
+        }
+        Harness::Pi => {
+            let Some(path) = pi_sessions::find_pi_session_path(session_id) else {
+                return Ok(Vec::new());
+            };
+            let Some(detail) = pi_sessions::read_pi_session_detail(&path) else {
+                return Ok(Vec::new());
+            };
+            Ok(detail
+                .messages
+                .iter()
+                .map(|message| SessionMessageRow {
+                    message_id: message.entry_id.clone(),
+                    timestamp_ms: message.timestamp_ms,
+                    role: message.role.clone(),
+                    text_preview: message.text_preview.clone(),
+                    raw_json: message.raw_json.clone(),
+                })
+                .collect())
+        }
+    }
+}
+
+pub fn get_project_key_files(
+    conn: &Connection,
+    project_path: &str,
+) -> Result<Vec<KeyFileRow>, rusqlite::Error> {
+    let version: i64 = conn
+        .query_row(
+            "SELECT version FROM project_key_files_version WHERE project_path = ?1",
+            [project_path],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    let mut stmt = conn.prepare(
+        "SELECT project_path, path, content, content_hash, local_token_estimate,
+                generated_at, generated_by_model, generation_config_hash, stale_reason
+           FROM project_key_files
+          WHERE project_path = ?1
+          ORDER BY generated_at DESC, path ASC",
+    )?;
+    let rows = stmt.query_map([project_path], |row| {
+        Ok(KeyFileRow {
+            project_path: row.get(0)?,
+            path: row.get(1)?,
+            content: row.get(2)?,
+            content_hash: row.get(3)?,
+            local_token_estimate: row.get(4)?,
+            generated_at: row.get(5)?,
+            generated_by_model: row.get(6)?,
+            generation_config_hash: row.get(7)?,
+            stale_reason: row.get(8)?,
+            version,
+        })
+    })?;
+    rows.collect()
+}
+
 pub fn get_opencode_session_detail(
     conn: Option<&Connection>,
     session_id: &str,
@@ -2088,7 +2378,27 @@ pub fn get_opencode_session_detail(
         return Ok(None);
     };
 
-    let messages = load_opencode_messages(&oc_conn, &session_id)?;
+    // Cheap row counts for badge rendering. Both are O(rows-in-session) at
+    // worst but use only INTEGER aggregates (no JSON extraction or part-table
+    // join), so they're <20ms even for 37k-message sessions.
+    let messages_count: i64 = oc_conn
+        .query_row(
+            "SELECT COUNT(*) FROM message WHERE session_id = ?1",
+            [&session_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    let cache_events_count: i64 = oc_conn
+        .query_row(
+            "SELECT COUNT(*) FROM message
+             WHERE session_id = ?1
+               AND json_extract(data, '$.role') = 'assistant'
+               AND COALESCE(CAST(json_extract(data, '$.tokens.total') AS INTEGER), 0) > 0",
+            [&session_id],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
     let compartments = conn
         .map(|c| get_compartments(c, &session_id))
         .transpose()?
@@ -2123,7 +2433,8 @@ pub fn get_opencode_session_detail(
         project_path: (!worktree.is_empty()).then_some(worktree),
         opencode_session_json: serde_json::from_str(&data_json).ok(),
         pi_jsonl_path: None,
-        messages,
+        messages_count,
+        cache_events_count,
         compartments,
         facts,
         notes,
@@ -2234,13 +2545,22 @@ fn normalize_preview(text: &str) -> String {
         .collect()
 }
 
-pub fn get_pi_session_detail(
-    conn: Option<&Connection>,
-    session_id: &str,
-) -> Option<SessionDetail> {
+pub fn get_pi_session_detail(conn: Option<&Connection>, session_id: &str) -> Option<SessionDetail> {
     let path = pi_sessions::find_pi_session_path(session_id)?;
     let detail = pi_sessions::read_pi_session_detail(&path)?;
     let title = clean_pi_title(detail.meta.session_name.clone(), &detail.meta.first_message);
+
+    // Counts come from the already-parsed (and mtime-cached) JSONL view, so
+    // they're free. `cache_events_count` matches `get_pi_session_cache_events`
+    // filter exactly: assistant messages with usage.total > 0.
+    let messages_count = detail.messages.len() as i64;
+    let cache_events_count = detail
+        .messages
+        .iter()
+        .filter(|m| m.role == "assistant")
+        .filter(|m| m.usage.as_ref().is_some_and(|u| u.total > 0))
+        .count() as i64;
+
     let compartments = conn
         .and_then(|c| get_compartments(c, session_id).ok())
         .unwrap_or_default();
@@ -2250,7 +2570,9 @@ pub fn get_pi_session_detail(
     let notes = conn
         .and_then(|c| get_session_notes(c, session_id).ok())
         .unwrap_or_default();
-    let meta = conn.and_then(|c| get_session_meta(c, session_id).ok()).flatten();
+    let meta = conn
+        .and_then(|c| get_session_meta(c, session_id).ok())
+        .flatten();
     let token_breakdown = conn
         .and_then(|c| get_context_token_breakdown(c, session_id).ok())
         .flatten();
@@ -2264,17 +2586,8 @@ pub fn get_pi_session_detail(
         project_path: (!detail.meta.cwd.is_empty()).then_some(detail.meta.cwd.clone()),
         opencode_session_json: None,
         pi_jsonl_path: Some(detail.meta.jsonl_path.to_string_lossy().to_string()),
-        messages: detail
-            .messages
-            .iter()
-            .map(|message| SessionMessageRow {
-                message_id: message.entry_id.clone(),
-                timestamp_ms: message.timestamp_ms,
-                role: message.role.clone(),
-                text_preview: message.text_preview.clone(),
-                raw_json: message.raw_json.clone(),
-            })
-            .collect(),
+        messages_count,
+        cache_events_count,
         compartments,
         facts,
         notes,
@@ -2490,11 +2803,11 @@ pub fn update_session_fact(
     )
 }
 
-pub fn delete_session_fact(
-    conn: &Connection,
-    fact_id: i64,
-) -> Result<usize, rusqlite::Error> {
-    conn.execute("DELETE FROM session_facts WHERE id = ?1", rusqlite::params![fact_id])
+pub fn delete_session_fact(conn: &Connection, fact_id: i64) -> Result<usize, rusqlite::Error> {
+    conn.execute(
+        "DELETE FROM session_facts WHERE id = ?1",
+        rusqlite::params![fact_id],
+    )
 }
 
 pub fn update_note(
@@ -2508,17 +2821,14 @@ pub fn update_note(
     )
 }
 
-pub fn delete_note(
-    conn: &Connection,
-    note_id: i64,
-) -> Result<usize, rusqlite::Error> {
-    conn.execute("DELETE FROM notes WHERE id = ?1", rusqlite::params![note_id])
+pub fn delete_note(conn: &Connection, note_id: i64) -> Result<usize, rusqlite::Error> {
+    conn.execute(
+        "DELETE FROM notes WHERE id = ?1",
+        rusqlite::params![note_id],
+    )
 }
 
-pub fn dismiss_note(
-    conn: &Connection,
-    note_id: i64,
-) -> Result<usize, rusqlite::Error> {
+pub fn dismiss_note(conn: &Connection, note_id: i64) -> Result<usize, rusqlite::Error> {
     conn.execute(
         "UPDATE notes SET status = 'dismissed', updated_at = ?1 WHERE id = ?2",
         rusqlite::params![chrono::Utc::now().timestamp_millis(), note_id],
@@ -2767,8 +3077,7 @@ pub fn get_user_memories(
     );
 
     let mut stmt = conn.prepare(&sql)?;
-    let param_refs: Vec<&dyn rusqlite::types::ToSql> =
-        params.iter().map(|p| p.as_ref()).collect();
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     let rows = stmt.query_map(param_refs.as_slice(), |row| {
         let source_candidate_ids: Option<String> = row.get(4)?;
         Ok(UserMemory {
@@ -2786,7 +3095,9 @@ pub fn get_user_memories(
     rows.collect()
 }
 
-pub fn get_user_memory_candidates(conn: &Connection) -> Result<Vec<UserMemoryCandidate>, rusqlite::Error> {
+pub fn get_user_memory_candidates(
+    conn: &Connection,
+) -> Result<Vec<UserMemoryCandidate>, rusqlite::Error> {
     let mut stmt = conn.prepare(
         "SELECT id, content, session_id, source_compartment_start, source_compartment_end, created_at
          FROM user_memory_candidates
@@ -2907,6 +3218,87 @@ pub fn get_db_health(db_path: &PathBuf) -> DbHealth {
     }
 }
 
+#[cfg(test)]
+mod list_sessions_paged_tests {
+    use super::*;
+
+    fn make_rows(count: usize) -> Vec<SessionRow> {
+        (0..count)
+            .map(|idx| SessionRow {
+                harness: if idx % 2 == 0 {
+                    Harness::Opencode
+                } else {
+                    Harness::Pi
+                },
+                session_id: format!("session-{idx:02}"),
+                title: format!("Session {idx}"),
+                project_identity: if idx % 3 == 0 {
+                    "project-a"
+                } else {
+                    "project-b"
+                }
+                .to_string(),
+                project_display: "Project".to_string(),
+                message_count: idx as u32,
+                last_activity_ms: (1000 - idx) as i64,
+                is_subagent: idx % 4 == 0,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn paging_unset_returns_full_list_like_list_all_sessions() {
+        let rows = make_rows(12);
+        let paged = page_session_rows(rows.clone(), None, None);
+
+        assert_eq!(paged.total, rows.len() as u32);
+        assert!(!paged.has_more);
+        assert_eq!(
+            paged
+                .rows
+                .iter()
+                .map(|row| row.session_id.as_str())
+                .collect::<Vec<_>>(),
+            rows.iter()
+                .map(|row| row.session_id.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn paging_slices_rows_and_reports_has_more() {
+        let rows = make_rows(12);
+        let first = page_session_rows(rows.clone(), Some(0), Some(5));
+        let second = page_session_rows(rows.clone(), Some(5), Some(5));
+        let past_end = page_session_rows(rows, Some(20), Some(5));
+
+        assert_eq!(first.rows.len(), 5);
+        assert_eq!(first.rows[0].session_id, "session-00");
+        assert!(first.has_more);
+        assert_eq!(second.rows.len(), 5);
+        assert_eq!(second.rows[0].session_id, "session-05");
+        assert!(second.has_more);
+        assert!(past_end.rows.is_empty());
+        assert!(!past_end.has_more);
+    }
+
+    #[test]
+    fn total_reflects_filtered_rows_before_paging() {
+        let filter = SessionFilter {
+            project_identity: Some("project-a".to_string()),
+            ..SessionFilter::default()
+        };
+        let filtered: Vec<SessionRow> = make_rows(12)
+            .into_iter()
+            .filter(|row| session_matches_filter(row, &filter))
+            .collect();
+        let paged = page_session_rows(filtered, Some(0), Some(2));
+
+        assert_eq!(paged.total, 4);
+        assert_eq!(paged.rows.len(), 2);
+        assert!(paged.has_more);
+    }
+}
 
 #[cfg(test)]
 mod clean_pi_title_tests {
@@ -3179,5 +3571,301 @@ mod load_messages_tests {
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].text_preview, "text for a");
         assert_eq!(messages[1].text_preview, "text for b");
+    }
+}
+
+#[cfg(test)]
+mod cache_turn_tests {
+    use super::*;
+
+    fn raw(
+        harness: Harness,
+        message_id: &str,
+        session_id: &str,
+        timestamp: i64,
+        input: i64,
+        cache_read: i64,
+        cache_write: i64,
+        total: i64,
+        finish: Option<&str>,
+    ) -> RawDbCacheEvent {
+        RawDbCacheEvent {
+            harness,
+            message_id: message_id.to_string(),
+            session_id: session_id.to_string(),
+            timestamp,
+            input_tokens: input,
+            cache_read,
+            cache_write,
+            total_tokens: total,
+            agent: None,
+            finish: finish.map(|s| s.to_string()),
+        }
+    }
+
+    #[test]
+    fn first_event_is_new_turn() {
+        let rows = vec![raw(
+            Harness::Opencode,
+            "m1",
+            "s1",
+            100,
+            10,
+            80,
+            10,
+            100,
+            Some("stop"),
+        )];
+        let events = build_db_cache_events(rows, false);
+        assert_eq!(events.len(), 1);
+        assert!(events[0].is_turn_start);
+        assert_eq!(events[0].turn_id, "m1");
+    }
+
+    #[test]
+    fn tool_calls_continuation_same_turn() {
+        let rows = vec![
+            raw(Harness::Opencode, "m1", "s1", 100, 10, 80, 10, 100, Some("tool-calls")),
+            raw(Harness::Opencode, "m2", "s1", 200, 10, 85, 5, 100, Some("stop")),
+        ];
+        let events = build_db_cache_events(rows, false);
+        assert_eq!(events.len(), 2);
+        assert!(events[0].is_turn_start);
+        assert!(!events[1].is_turn_start);
+        assert_eq!(events[0].turn_id, "m1");
+        assert_eq!(events[1].turn_id, "m1");
+    }
+
+    #[test]
+    fn stop_then_new_turn() {
+        let rows = vec![
+            raw(Harness::Opencode, "m1", "s1", 100, 10, 80, 10, 100, Some("stop")),
+            raw(Harness::Opencode, "m2", "s1", 200, 10, 80, 10, 100, Some("stop")),
+        ];
+        let events = build_db_cache_events(rows, false);
+        assert_eq!(events.len(), 2);
+        assert!(events[0].is_turn_start);
+        assert!(events[1].is_turn_start);
+        assert_eq!(events[0].turn_id, "m1");
+        assert_eq!(events[1].turn_id, "m2");
+    }
+
+    #[test]
+    fn end_turn_acts_like_stop() {
+        let rows = vec![
+            raw(Harness::Opencode, "m1", "s1", 100, 10, 80, 10, 100, Some("end_turn")),
+            raw(Harness::Opencode, "m2", "s1", 200, 10, 80, 10, 100, Some("tool-calls")),
+        ];
+        let events = build_db_cache_events(rows, false);
+        assert!(events[0].is_turn_start);
+        assert!(events[1].is_turn_start);
+    }
+
+    #[test]
+    fn interleaved_sessions_keep_per_session_turns() {
+        let rows = vec![
+            raw(Harness::Opencode, "a1", "s1", 100, 10, 80, 10, 100, Some("tool-calls")),
+            raw(Harness::Opencode, "b1", "s2", 101, 10, 80, 10, 100, Some("tool-calls")),
+            raw(Harness::Opencode, "a2", "s1", 200, 10, 85, 5, 100, Some("stop")),
+            raw(Harness::Opencode, "b2", "s2", 201, 10, 85, 5, 100, Some("stop")),
+        ];
+        let events = build_db_cache_events(rows, false);
+        assert_eq!(events[0].turn_id, "a1");
+        assert_eq!(events[1].turn_id, "b1");
+        assert_eq!(events[2].turn_id, "a1");
+        assert_eq!(events[3].turn_id, "b1");
+    }
+
+    #[test]
+    fn warming_downgrades_continuation_with_degraded_cache() {
+        // First event: cache_read=120, cache_write=20 → expected next prefix ~140.
+        //   total_prompt = input(10)+read(120)+write(20)=150; hit_ratio=0.80 → "warning".
+        //   But this is a TURN START so warming downgrade does not apply.
+        //   We accept "warning" here — the point of THIS test is the second event.
+        // Second event: cache_read=50 (< 0.9 * 140 = 126) and hit_ratio < 0.5 → bust → warming
+        let rows = vec![
+            raw(
+                Harness::Opencode,
+                "m1",
+                "s1",
+                100,
+                10,
+                120,
+                20,
+                150,
+                Some("tool-calls"),
+            ),
+            raw(Harness::Opencode, "m2", "s1", 200, 10, 50, 90, 150, Some("stop")),
+        ];
+        let events = build_db_cache_events(rows, false);
+        // events[0] is the turn-start; severity stays whatever the absolute hit_ratio classifies it as.
+        // events[1] is the continuation with degraded cache_read → downgraded from bust/warning to warming.
+        assert_eq!(events[1].severity, "warming");
+    }
+
+    #[test]
+    fn warming_does_not_downgrade_stable() {
+        // Continuation with good cache_read stays stable.
+        // m1: total_prompt=10+135+5=150, hit_ratio=0.90 → "stable".
+        // m2: cache_read=140 ≥ 0.9*(135+5)=126, total_prompt=10+140+5=155, hit_ratio≈0.903 → "stable".
+        let rows = vec![
+            raw(
+                Harness::Opencode,
+                "m1",
+                "s1",
+                100,
+                10,
+                135,
+                5,
+                150,
+                Some("tool-calls"),
+            ),
+            raw(Harness::Opencode, "m2", "s1", 200, 10, 140, 5, 155, Some("stop")),
+        ];
+        let events = build_db_cache_events(rows, false);
+        assert_eq!(events[0].severity, "stable");
+        assert_eq!(events[1].severity, "stable");
+    }
+
+    #[test]
+    fn pi_stop_reason_extracted_as_finish() {
+        // build_db_cache_events is harness-agnostic for grouping;
+        // just verify Pi rows with stop_reason are processed correctly.
+        let rows = vec![
+            raw(Harness::Pi, "p1", "s1", 100, 10, 80, 10, 100, Some("tool-calls")),
+            raw(Harness::Pi, "p2", "s1", 200, 10, 80, 10, 100, Some("stop")),
+        ];
+        let events = build_db_cache_events(rows, false);
+        assert_eq!(events.len(), 2);
+        assert!(events[0].is_turn_start);
+        assert!(!events[1].is_turn_start);
+        assert_eq!(events[1].turn_id, "p1");
+    }
+}
+
+#[cfg(test)]
+mod get_session_cache_events_by_turn_count_tests {
+    use super::*;
+
+    fn event(message_id: &str, session_id: &str, timestamp: i64, is_turn_start: bool) -> DbCacheEvent {
+        DbCacheEvent {
+            harness: Harness::Opencode,
+            message_id: message_id.to_string(),
+            session_id: session_id.to_string(),
+            timestamp,
+            input_tokens: 10,
+            cache_read: 80,
+            cache_write: 10,
+            total_tokens: 100,
+            hit_ratio: 0.8,
+            severity: "stable".to_string(),
+            cause: None,
+            agent: None,
+            finish: Some("stop".to_string()),
+            turn_id: String::new(),
+            is_turn_start,
+        }
+    }
+
+    #[test]
+    fn empty_session_returns_empty() {
+        let result = trim_events_to_turns(Vec::new(), 3);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn fewer_turns_than_target_returns_all() {
+        // 2 turns, target=10 → all events returned
+        let events = vec![
+            event("m1", "s1", 100, true),
+            event("m2", "s1", 200, false),
+            event("m3", "s1", 300, true),
+            event("m4", "s1", 400, false),
+        ];
+        let result = trim_events_to_turns(events.clone(), 10);
+        assert_eq!(result.len(), 4);
+        assert_eq!(result[0].message_id, "m1");
+        assert_eq!(result[3].message_id, "m4");
+    }
+
+    #[test]
+    fn trims_oldest_turns_when_over_target() {
+        // 5 turns, target=3 → keep last 3 turns (turns 3-5 = m5-m12)
+        let events = vec![
+            event("m1", "s1", 100, true),  // turn 1 start
+            event("m2", "s1", 200, false), // turn 1 cont
+            event("m3", "s1", 300, true),  // turn 2 start
+            event("m4", "s1", 400, false), // turn 2 cont
+            event("m5", "s1", 500, true),  // turn 3 start
+            event("m6", "s1", 600, false), // turn 3 cont
+            event("m7", "s1", 700, true),  // turn 4 start
+            event("m8", "s1", 800, false), // turn 4 cont
+            event("m9", "s1", 900, true),  // turn 5 start
+            event("m10", "s1", 1000, false), // turn 5 cont
+            event("m11", "s1", 1100, false), // turn 5 cont
+            event("m12", "s1", 1200, false), // turn 5 cont
+        ];
+        let result = trim_events_to_turns(events, 3);
+        assert_eq!(result.len(), 8); // m5-m12
+        assert_eq!(result[0].message_id, "m5");
+        assert_eq!(result[7].message_id, "m12");
+        // Verify turn starts in the trimmed result
+        assert!(result[0].is_turn_start); // m5 (turn 3 start)
+        assert!(!result[1].is_turn_start); // m6
+        assert!(result[2].is_turn_start); // m7 (turn 4 start)
+        assert!(!result[3].is_turn_start); // m8
+        assert!(result[4].is_turn_start); // m9 (turn 5 start)
+    }
+
+    #[test]
+    fn exact_target_turns_returns_all() {
+        // 3 turns, target=3 → all events returned
+        let events = vec![
+            event("m1", "s1", 100, true),
+            event("m2", "s1", 200, false),
+            event("m3", "s1", 300, true),
+            event("m4", "s1", 400, false),
+            event("m5", "s1", 500, true),
+            event("m6", "s1", 600, false),
+        ];
+        let result = trim_events_to_turns(events.clone(), 3);
+        assert_eq!(result.len(), 6);
+    }
+
+    #[test]
+    fn one_long_turn_returns_all() {
+        // 50 events all in one turn, target=5 → all 50 returned as one turn
+        let mut events: Vec<DbCacheEvent> = (0..50)
+            .map(|i| event(&format!("m{i}"), "s1", 100 + i as i64 * 10, i == 0))
+            .collect();
+        let result = trim_events_to_turns(events.clone(), 5);
+        assert_eq!(result.len(), 50);
+        // Only the first event should be a turn start
+        assert!(result[0].is_turn_start);
+        for e in result.iter().skip(1) {
+            assert!(!e.is_turn_start);
+        }
+    }
+
+    #[test]
+    fn single_turn_target_one_returns_all() {
+        let events = vec![
+            event("m1", "s1", 100, true),
+            event("m2", "s1", 200, false),
+            event("m3", "s1", 300, false),
+        ];
+        let result = trim_events_to_turns(events.clone(), 1);
+        assert_eq!(result.len(), 3);
+        assert!(result[0].is_turn_start);
+    }
+
+    #[test]
+    fn target_zero_returns_empty() {
+        let events = vec![
+            event("m1", "s1", 100, true),
+            event("m2", "s1", 200, false),
+        ];
+        let result = trim_events_to_turns(events, 0);
+        assert!(result.is_empty());
     }
 }

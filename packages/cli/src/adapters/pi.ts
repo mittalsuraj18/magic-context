@@ -118,7 +118,7 @@ export class PiAdapter implements HarnessAdapter {
     }
 
     getInstallHint(): string {
-        return "Install Pi: https://pi.coding/install (npm: @mariozechner/pi-coding-agent)";
+        return "Install Pi: https://pi.coding/install (npm: @earendil-works/pi-coding-agent)";
     }
 
     getPluginCacheInfo(): PluginCacheInfo {
@@ -130,7 +130,7 @@ export class PiAdapter implements HarnessAdapter {
     }
 
     getLogPath(): string {
-        return getMagicContextLogPath();
+        return getMagicContextLogPath("pi");
     }
 
     getInstalledPluginVersion(): string | null {

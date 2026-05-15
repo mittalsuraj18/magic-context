@@ -9,7 +9,7 @@ import {
     writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { MagicContextConfigSchema } from "@magic-context/core/config/schema/magic-context";
@@ -29,23 +29,31 @@ import { loadPiConfig } from "@magic-context/pi-core/config";
 import { parse as parseJsonc, stringify as stringifyJsonc } from "comment-json";
 import { collectDiagnostics } from "../lib/diagnostics-pi";
 import { bundleIssueReport } from "../lib/logs-pi";
-import { getPiAgentConfigDir, getPiUserConfigPath, getPiUserExtensionsPath } from "../lib/paths";
+import {
+    getMagicContextLogPath,
+    getPiAgentConfigDir,
+    getPiUserConfigPath,
+    getPiUserExtensionsPath,
+} from "../lib/paths";
 import {
     detectPiBinary,
     getPiVersion,
     PI_PACKAGE_SOURCE,
     type PiBinaryInfo,
 } from "../lib/pi-helpers";
+import {
+    describePiPackageEntry,
+    hasPiMagicContextPackage,
+    isPiMagicContextPackageEntry,
+} from "../lib/pi-package-entry";
 import { type PromptIO, promptIO } from "../lib/prompts";
 import { writePiSettingsPackage } from "./setup-pi";
 
 const PACKAGE_NAME = "@cortexkit/pi-magic-context";
-// Pi 0.71.0 introduced the `--extension` long-form flag (replacing `-x`).
-// Magic Context spawns subagents with `--extension <lean-entry>` to load
-// only the lean tool surface in subagents without recursive plugin loading,
-// so older Pi versions hard-fail with "Unknown option: -x". This is also
-// our peerDependency floor in package.json.
-const MIN_PI_VERSION = "0.71.0";
+// Pi 0.74.0 renamed the npm package scope from `@mariozechner/pi-coding-agent`
+// to `@earendil-works/pi-coding-agent`. Magic Context's peerDependency targets
+// the new scope, so older Pi installs cannot load this extension.
+const MIN_PI_VERSION = "0.74.0";
 const ROW_COUNT_TABLES = ["tags", "compartments", "memories", "notes", "dream_runs"];
 
 type CheckStatus = "pass" | "warn" | "fail" | "info";
@@ -208,19 +216,8 @@ function readJsonc(path: string): {
     }
 }
 
-function packagesFrom(settings: Record<string, unknown>): string[] {
-    return Array.isArray(settings.packages)
-        ? settings.packages.filter((entry): entry is string => typeof entry === "string")
-        : [];
-}
-
-function hasPiPackage(packages: string[]): boolean {
-    return packages.some(
-        (entry) =>
-            entry === PI_PACKAGE_SOURCE ||
-            entry === PACKAGE_NAME ||
-            entry.includes("pi-magic-context"),
-    );
+function packagesFrom(settings: Record<string, unknown>): unknown[] {
+    return Array.isArray(settings.packages) ? settings.packages : [];
 }
 
 function projectConfigPath(cwd: string): string {
@@ -378,7 +375,7 @@ async function runHealthChecks(options: {
             add(
                 results,
                 "fail",
-                `Pi ${version} is older than required ${MIN_PI_VERSION}. Subagents (historian/dreamer/sidekick) use the long-form \`--extension\` flag introduced in Pi 0.71.0; older versions hard-fail with "Unknown option". Run \`pi update\` (or \`npm install -g @mariozechner/pi-coding-agent@latest\`).`,
+                `Pi ${version} is older than required ${MIN_PI_VERSION}. Subagents (historian/dreamer/sidekick) use the long-form \`--extension\` flag introduced in Pi 0.71.0; older versions hard-fail with "Unknown option". Run \`pi update\` (or \`npm install -g @earendil-works/pi-coding-agent@latest\`).`,
             );
         } else if (version) {
             add(results, "pass", `Pi version meets minimum ${MIN_PI_VERSION} requirement`);
@@ -403,7 +400,7 @@ async function runHealthChecks(options: {
     }
 
     const settingsPath = getPiUserExtensionsPath();
-    let packages: string[] = [];
+    let packages: unknown[] = [];
     if (!existsSync(settingsPath)) {
         add(results, "warn", `Pi settings not found at ${settingsPath}`);
         repairPlan.addPackageEntry = true;
@@ -414,7 +411,7 @@ async function runHealthChecks(options: {
         } else {
             packages = packagesFrom(parsed.value);
             add(results, "pass", `Pi settings found at ${settingsPath}`);
-            if (hasPiPackage(packages)) {
+            if (hasPiMagicContextPackage(packages)) {
                 add(results, "pass", `${PI_PACKAGE_SOURCE} is registered in packages[]`);
             } else {
                 add(results, "warn", `${PI_PACKAGE_SOURCE} is missing from packages[]`);
@@ -580,7 +577,7 @@ async function runHealthChecks(options: {
     // extensions today, but we still check for self-conflicts that the user
     // can hit (e.g. accidentally registering both an npm entry AND a local
     // dev-path entry, which causes duplicate plugin loading).
-    const piEntries = packages.filter((entry) => hasPiPackage([entry]));
+    const piEntries = packages.filter(isPiMagicContextPackageEntry).map(describePiPackageEntry);
     if (piEntries.length > 1) {
         add(
             results,
@@ -591,7 +588,9 @@ async function runHealthChecks(options: {
         add(results, "pass", "No conflicting magic-context entries in Pi packages[]");
     }
 
-    const otherExtensions = packages.filter((entry) => !hasPiPackage([entry]));
+    const otherExtensions = packages
+        .filter((entry) => !isPiMagicContextPackageEntry(entry))
+        .map(describePiPackageEntry);
     if (otherExtensions.length > 0) {
         add(results, "info", `Other Pi extensions registered: ${otherExtensions.join(", ")}`);
     } else {
@@ -610,7 +609,7 @@ async function runHealthChecks(options: {
         add(results, "pass", "Pi extension cache clean (no stale cached package found)");
     }
 
-    const logPath = join(tmpdir(), "magic-context.log");
+    const logPath = getMagicContextLogPath("pi");
     if (existsSync(logPath)) {
         const stat = statSync(logPath);
         const sizeKb = (stat.size / 1024).toFixed(0);
@@ -624,33 +623,38 @@ async function runHealthChecks(options: {
         add(results, "info", `No plugin log file yet at ${logPath}`);
     }
 
-    // Historian debug dumps — kept on disk after failed historian runs so
-    // users can attach them to bug reports. Aligned with OpenCode doctor.
-    const historianDumpDir = join(tmpdir(), "magic-context-historian");
-    if (existsSync(historianDumpDir)) {
-        try {
-            const dumps = readdirSync(historianDumpDir)
-                .filter((f) => f.endsWith(".xml"))
-                .map((f) => ({ name: f, mtime: statSync(join(historianDumpDir, f)).mtimeMs }))
-                .sort((a, b) => b.mtime - a.mtime);
-            if (dumps.length > 0) {
-                add(
-                    results,
-                    "warn",
-                    `Historian debug dumps: ${dumps.length} file(s) in ${historianDumpDir}`,
-                );
-                for (const dump of dumps.slice(0, 3)) {
-                    const age = Math.round((Date.now() - dump.mtime) / 60000);
-                    const ageStr = age < 60 ? `${age}m ago` : `${Math.round(age / 60)}h ago`;
-                    add(results, "info", `  ${dump.name} (${ageStr})`);
-                }
-                if (dumps.length > 3) {
-                    add(results, "info", `  ... and ${dumps.length - 3} more`);
-                }
+    // Historian dumps now live per-project under `<dir>/.opencode/magic-context/historian/`
+    // — surface them grouped by project. Falls back to the legacy harness-scoped
+    // tmp-dir layout when no project-local dumps are present (pre-Phase-3 plugin
+    // versions or fresh installs).
+    const diagnosticsForDumps = await collectDiagnostics(options.cwd);
+    const dumpBuckets = diagnosticsForDumps.historianDumps.byProject;
+    if (dumpBuckets.length > 0) {
+        const totalCount = dumpBuckets.reduce((sum, b) => sum + b.count, 0);
+        add(
+            results,
+            "warn",
+            `Historian debug dumps: ${totalCount} file(s) across ${dumpBuckets.length} project(s)`,
+        );
+        for (const bucket of dumpBuckets) {
+            add(results, "info", `  [${bucket.directory}] ${bucket.count} file(s)`);
+            for (const dump of bucket.recent.slice(0, 3)) {
+                const age = dump.ageMinutes;
+                const ageStr = age < 60 ? `${age}m ago` : `${Math.round(age / 60)}h ago`;
+                add(results, "info", `    ${dump.name} (${ageStr})`);
             }
-        } catch {
-            // Can't read dump directory — skip
+            if (bucket.count > 3) {
+                add(results, "info", `    ... and ${bucket.count - 3} more`);
+            }
         }
+    }
+    const legacyDumps = diagnosticsForDumps.historianDumps.legacyDumps;
+    if (legacyDumps.count > 0) {
+        add(
+            results,
+            "info",
+            `Legacy historian dumps (pre-v0.18.x): ${legacyDumps.count} file(s) in ${legacyDumps.dir}`,
+        );
     }
 
     if (!options.quiet) {
@@ -752,9 +756,31 @@ async function runIssueFlow(options: {
     spinner.start("Collecting sanitized Pi diagnostics");
     try {
         const report = await options.deps.collectDiagnostics(options.cwd);
+        spinner.stop("Diagnostics collected");
+
+        let sessionFilter: string | null = null;
+        if (report.recentSessions.length > 1) {
+            const choice = await options.prompts.selectOne(
+                "Which Pi session is this issue about? (filters log lines from other sessions)",
+                [
+                    ...report.recentSessions.map((session, index) => ({
+                        label: `${session.directory} — ${session.sessionId}${index === 0 ? " (most recent)" : ""}`,
+                        value: session.sessionId,
+                    })),
+                    {
+                        label: "All sessions (no filtering)",
+                        value: "__all__",
+                    },
+                ],
+            );
+            sessionFilter = choice === "__all__" ? null : choice;
+        }
+
+        spinner.start("Bundling Pi issue report");
         const bundled = await bundleIssueReport(report, description, title, {
             cwd: options.cwd,
             now: options.deps.now(),
+            sessionFilter,
         });
         spinner.stop(`Report written to ${bundled.path}`);
 

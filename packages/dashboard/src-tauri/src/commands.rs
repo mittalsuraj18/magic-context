@@ -112,6 +112,11 @@ pub fn list_sessions(filter: Option<db::SessionFilter>) -> Vec<db::SessionRow> {
 }
 
 #[tauri::command]
+pub fn list_sessions_paged(filter: Option<db::SessionFilter>) -> db::PagedSessions {
+    db::list_sessions_paged(filter.unwrap_or_default())
+}
+
+#[tauri::command]
 pub fn get_session_detail(
     state: State<'_, AppState>,
     harness: String,
@@ -128,11 +133,50 @@ pub fn get_session_detail(
 }
 
 #[tauri::command]
-pub fn get_session_cache_events(harness: String, session_id: String) -> Vec<db::DbCacheEvent> {
+pub fn get_session_cache_events(
+    harness: String,
+    session_id: String,
+    limit: Option<usize>,
+) -> Vec<db::DbCacheEvent> {
     match harness.parse::<db::Harness>() {
-        Ok(harness) => db::get_session_cache_events(harness, &session_id),
+        Ok(harness) => db::get_session_cache_events(harness, &session_id, limit),
         Err(_) => Vec::new(),
     }
+}
+
+#[tauri::command]
+pub fn get_session_cache_events_by_turns(
+    harness: String,
+    session_id: String,
+    target_turns: usize,
+) -> Vec<db::DbCacheEvent> {
+    match harness.parse::<db::Harness>() {
+        Ok(harness) => {
+            db::get_session_cache_events_by_turn_count(harness, &session_id, target_turns)
+        }
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Lazy fetch for the Messages tab; see `db::get_session_messages` for why
+/// this is split from `get_session_detail`.
+#[tauri::command]
+pub fn get_session_messages(
+    harness: String,
+    session_id: String,
+) -> Result<Vec<db::SessionMessageRow>, String> {
+    let harness = harness.parse::<db::Harness>()?;
+    db::get_session_messages(harness, &session_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn get_project_key_files(
+    state: State<'_, AppState>,
+    project_path: String,
+) -> Result<Vec<db::KeyFileRow>, String> {
+    let path = state.get_db_path()?;
+    let conn = db::open_readonly(&path).map_err(|e| e.to_string())?;
+    db::get_project_key_files(&conn, &project_path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -141,7 +185,9 @@ pub fn enumerate_projects() -> Vec<db::ProjectRow> {
 }
 
 #[tauri::command]
-pub fn enumerate_memory_projects(state: State<'_, AppState>) -> Result<Vec<db::ProjectRow>, String> {
+pub fn enumerate_memory_projects(
+    state: State<'_, AppState>,
+) -> Result<Vec<db::ProjectRow>, String> {
     let path = state.get_db_path()?;
     let conn = db::open_readonly(&path).map_err(|e| e.to_string())?;
     db::enumerate_memory_projects(&conn).map_err(|e| e.to_string())
@@ -200,10 +246,7 @@ pub fn update_session_fact(
 }
 
 #[tauri::command]
-pub fn delete_session_fact(
-    state: State<'_, AppState>,
-    fact_id: i64,
-) -> Result<(), String> {
+pub fn delete_session_fact(state: State<'_, AppState>, fact_id: i64) -> Result<(), String> {
     let path = state.get_db_path()?;
     let conn = db::open_readwrite(&path).map_err(|e| e.to_string())?;
     db::delete_session_fact(&conn, fact_id).map_err(|e| e.to_string())?;
@@ -223,10 +266,7 @@ pub fn update_note(
 }
 
 #[tauri::command]
-pub fn delete_note(
-    state: State<'_, AppState>,
-    note_id: i64,
-) -> Result<(), String> {
+pub fn delete_note(state: State<'_, AppState>, note_id: i64) -> Result<(), String> {
     let path = state.get_db_path()?;
     let conn = db::open_readwrite(&path).map_err(|e| e.to_string())?;
     db::delete_note(&conn, note_id).map_err(|e| e.to_string())?;
@@ -234,10 +274,7 @@ pub fn delete_note(
 }
 
 #[tauri::command]
-pub fn dismiss_note(
-    state: State<'_, AppState>,
-    note_id: i64,
-) -> Result<(), String> {
+pub fn dismiss_note(state: State<'_, AppState>, note_id: i64) -> Result<(), String> {
     let path = state.get_db_path()?;
     let conn = db::open_readwrite(&path).map_err(|e| e.to_string())?;
     db::dismiss_note(&conn, note_id).map_err(|e| e.to_string())?;
@@ -446,6 +483,67 @@ pub async fn get_available_models() -> Vec<String> {
     Vec::new()
 }
 
+/// Parse the tabular output of `pi --list-models` into `provider/model` strings.
+///
+/// Skips the header line, empty lines, and any row with fewer than 2 tokens.
+/// Whitespace is normalized via `split_whitespace`.
+pub fn parse_pi_models_output(text: &str) -> Vec<String> {
+    text.lines()
+        .skip(1) // skip header
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|line| {
+            let tokens: Vec<&str> = line.split_whitespace().take(2).collect();
+            if tokens.len() >= 2 {
+                Some(format!("{}/{}", tokens[0], tokens[1]))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub async fn get_available_pi_models() -> Vec<String> {
+    // GUI apps on macOS don't inherit shell PATH; try common locations.
+    //
+    // The first candidate is `~/.pi/bin/pi` because that's the path the
+    // official pi-coding-agent installer writes to and it's NOT on the GUI
+    // launcher's $PATH on macOS. Additional fallback paths cover pre-CI
+    // installs, custom installs, Homebrew on Intel + ARM, and shell-PATH
+    // discovery for users who launched from a terminal.
+    let candidates = if cfg!(target_os = "windows") {
+        let home = std::env::var("USERPROFILE").unwrap_or_default();
+        vec![
+            format!("{}\\.pi\\bin\\pi.exe", home),
+            "pi.exe".to_string(),
+        ]
+    } else {
+        let home = std::env::var("HOME").unwrap_or_default();
+        vec![
+            format!("{}/.pi/bin/pi", home),
+            "pi".to_string(),
+            format!("{}/.local/bin/pi", home),
+            "/usr/local/bin/pi".to_string(),
+            "/opt/homebrew/bin/pi".to_string(),
+        ]
+    };
+
+    for bin in &candidates {
+        if let Ok(output) = tokio::process::Command::new(bin)
+            .arg("--list-models")
+            .output()
+            .await
+        {
+            if output.status.success() {
+                let text = String::from_utf8_lossy(&output.stdout);
+                return parse_pi_models_output(&text);
+            }
+        }
+    }
+
+    Vec::new()
+}
+
 // ── Embedding test ──────────────────────────────────────────
 
 /// Probe an OpenAI-compatible embedding endpoint and classify the outcome.
@@ -549,40 +647,28 @@ pub fn get_user_memory_candidates(
 }
 
 #[tauri::command]
-pub fn dismiss_user_memory(
-    state: State<'_, AppState>,
-    id: i64,
-) -> Result<(), String> {
+pub fn dismiss_user_memory(state: State<'_, AppState>, id: i64) -> Result<(), String> {
     let path = state.get_db_path()?;
     let conn = db::open_readwrite(&path).map_err(|e| e.to_string())?;
     db::dismiss_user_memory(&conn, id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn delete_user_memory(
-    state: State<'_, AppState>,
-    id: i64,
-) -> Result<(), String> {
+pub fn delete_user_memory(state: State<'_, AppState>, id: i64) -> Result<(), String> {
     let path = state.get_db_path()?;
     let conn = db::open_readwrite(&path).map_err(|e| e.to_string())?;
     db::delete_user_memory(&conn, id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn delete_user_memory_candidate(
-    state: State<'_, AppState>,
-    id: i64,
-) -> Result<(), String> {
+pub fn delete_user_memory_candidate(state: State<'_, AppState>, id: i64) -> Result<(), String> {
     let path = state.get_db_path()?;
     let conn = db::open_readwrite(&path).map_err(|e| e.to_string())?;
     db::delete_user_memory_candidate(&conn, id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn promote_user_memory_candidate(
-    state: State<'_, AppState>,
-    id: i64,
-) -> Result<(), String> {
+pub fn promote_user_memory_candidate(state: State<'_, AppState>, id: i64) -> Result<(), String> {
     let path = state.get_db_path()?;
     let conn = db::open_readwrite(&path).map_err(|e| e.to_string())?;
     db::promote_user_memory_candidate(&conn, id).map_err(|e| e.to_string())
@@ -601,5 +687,48 @@ pub fn get_db_health(state: State<'_, AppState>) -> db::DbHealth {
             wal_size_bytes: 0,
             table_counts: Vec::new(),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_pi_models_output;
+
+    #[test]
+    fn test_parse_pi_models_output_normal() {
+        let input = "provider        model                           context  max-out  thinking  images\nanthropic       claude-opus-4-5                 200K     64K      yes       yes   \ncerebras        gpt-oss-120b                    131.1K   32.8K    yes       no    \ngithub-copilot  claude-opus-4.7                 144K     64K      yes       yes   \n";
+        let result = parse_pi_models_output(input);
+        assert_eq!(
+            result,
+            vec![
+                "anthropic/claude-opus-4-5",
+                "cerebras/gpt-oss-120b",
+                "github-copilot/claude-opus-4.7",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_pi_models_output_empty() {
+        assert!(parse_pi_models_output("").is_empty());
+    }
+
+    #[test]
+    fn test_parse_pi_models_output_header_only() {
+        assert!(parse_pi_models_output("provider        model").is_empty());
+    }
+
+    #[test]
+    fn test_parse_pi_models_output_extra_whitespace() {
+        let input = "provider   model\n  anthropic    claude-sonnet-4-5  \n\n  \n";
+        let result = parse_pi_models_output(input);
+        assert_eq!(result, vec!["anthropic/claude-sonnet-4-5"]);
+    }
+
+    #[test]
+    fn test_parse_pi_models_output_single_token_skipped() {
+        let input = "provider   model\nanthropic\n  \ncerebras  gpt-oss\n";
+        let result = parse_pi_models_output(input);
+        assert_eq!(result, vec!["cerebras/gpt-oss"]);
     }
 }

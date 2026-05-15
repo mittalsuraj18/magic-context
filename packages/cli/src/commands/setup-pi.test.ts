@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { parse as parseJsonc } from "comment-json";
 import type { PromptIO, PromptSpinner, SelectOption } from "../lib/prompts";
-import { runSetup, type SetupEnvironment } from "./setup-pi";
+import { runSetup, type SetupEnvironment, writePiSettingsPackage } from "./setup-pi";
 
 const tempRoots: string[] = [];
 
@@ -74,6 +74,53 @@ afterEach(() => {
 });
 
 describe("runSetup", () => {
+    it("preserves object-form Pi package entries and detects object-form Magic Context", () => {
+        const root = makeTempRoot();
+        const settingsPath = join(root, "settings.json");
+        mkdirSync(root, { recursive: true });
+
+        const existing = {
+            packages: [
+                { name: "npm:@cortexkit/pi-magic-context", version: "1.2.3" },
+                "npm:other-string-extension",
+                { name: "third-party-extension", version: "9.9.9", enabled: true },
+            ],
+        };
+        writeFileSync(settingsPath, JSON.stringify(existing));
+
+        const added = writePiSettingsPackage(settingsPath);
+        const updated = parseJsonc(
+            readFileSync(settingsPath, "utf-8"),
+        ) as unknown as typeof existing;
+
+        expect(added).toBe(false);
+        expect(updated.packages).toEqual(existing.packages);
+    });
+
+    it("round-trips mixed string and object package entries when adding Magic Context", () => {
+        const root = makeTempRoot();
+        const settingsPath = join(root, "settings.json");
+        mkdirSync(root, { recursive: true });
+        writeFileSync(
+            settingsPath,
+            JSON.stringify({
+                packages: ["npm:one", { name: "two", version: "2.0.0" }],
+            }),
+        );
+
+        const added = writePiSettingsPackage(settingsPath);
+        const updated = parseJsonc(readFileSync(settingsPath, "utf-8")) as {
+            packages?: unknown[];
+        };
+
+        expect(added).toBe(true);
+        expect(updated.packages).toEqual([
+            "npm:one",
+            { name: "two", version: "2.0.0" },
+            "npm:@cortexkit/pi-magic-context",
+        ]);
+    });
+
     it("writes Pi settings and magic-context config with mocked prompts", async () => {
         const root = makeTempRoot();
         const agentDir = join(root, ".pi", "agent");
@@ -81,7 +128,7 @@ describe("runSetup", () => {
 
         const env: SetupEnvironment = {
             detectPiBinary: () => ({ path: join(root, "bin", "pi"), source: "path" }),
-            getPiVersion: () => "0.71.0",
+            getPiVersion: () => "0.74.0",
             getAvailableModels: () => [
                 "anthropic/claude-haiku-4-5",
                 "anthropic/claude-sonnet-4-6",
@@ -136,7 +183,7 @@ describe("runSetup", () => {
 
         const env: SetupEnvironment = {
             detectPiBinary: () => ({ path: join(root, "bin", "pi"), source: "path" }),
-            getPiVersion: () => "0.71.0",
+            getPiVersion: () => "0.74.0",
             // Only github-copilot model so buildModelSelection always picks it first
             getAvailableModels: () => ["github-copilot/gpt-5.4"],
             paths: {
@@ -182,7 +229,7 @@ describe("runSetup", () => {
         expect(prompts.messages.join("\n")).toContain("Pi not found");
     });
 
-    it("warns and exits when Pi version is below 0.71.0 and user declines", async () => {
+    it("warns and exits when Pi version is below 0.74.0 and user declines", async () => {
         const root = makeTempRoot();
         const agentDir = join(root, ".pi", "agent");
         const env: SetupEnvironment = {
@@ -202,13 +249,13 @@ describe("runSetup", () => {
 
         expect(code).toBe(0);
         const log = prompts.messages.join("\n");
-        expect(log).toContain("Pi 0.69.0 is older than the required 0.71.0");
+        expect(log).toContain("Pi 0.69.0 is older than the required 0.74.0");
         expect(log).toContain("outro:Setup cancelled");
         expect(existsSync(join(agentDir, "magic-context.jsonc"))).toBe(false);
         expect(existsSync(join(agentDir, "settings.json"))).toBe(false);
     });
 
-    it("continues setup when Pi version is below 0.71.0 and user opts in", async () => {
+    it("continues setup when Pi version is below 0.74.0 and user opts in", async () => {
         const root = makeTempRoot();
         const agentDir = join(root, ".pi", "agent");
         const env: SetupEnvironment = {
@@ -230,7 +277,7 @@ describe("runSetup", () => {
         expect(code).toBe(0);
         expect(existsSync(join(agentDir, "magic-context.jsonc"))).toBe(true);
         expect(prompts.messages.join("\n")).toContain(
-            "Pi 0.69.0 is older than the required 0.71.0",
+            "Pi 0.69.0 is older than the required 0.74.0",
         );
     });
 });

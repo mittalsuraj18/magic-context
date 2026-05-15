@@ -670,7 +670,7 @@ export function registerRpcHandlers(
             // Without these signals the TUI recomp would silently leave
             // injection cache stale, causing defer passes to render an
             // outdated history block until the next natural cache bust.
-            onInjectionCacheCleared: (sid) => {
+            onCompartmentStatePublished: (sid) => {
                 liveSessionState.historyRefreshSessions.add(sid);
                 liveSessionState.pendingMaterializationSessions.add(sid);
             },
@@ -690,8 +690,11 @@ export function registerRpcHandlers(
         return { ok: true };
     });
 
-    rpcServer.handle("pending-notifications", async () => {
-        const notifications = drainNotifications();
+    rpcServer.handle("pending-notifications", async (params) => {
+        const lastReceivedId = Number(params.lastReceivedId ?? 0);
+        const notifications = drainNotifications(
+            Number.isFinite(lastReceivedId) ? lastReceivedId : 0,
+        );
         return { messages: notifications } as unknown as Record<string, unknown>;
     });
 }
